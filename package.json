@@ -56,6 +56,20 @@
         "icon": "$(close)"
       }
     ],
+    "configuration": {
+      "title": "TraneAI",
+      "properties": {
+        "trane-ai.openIn": {
+          "type": "string",
+          "enum": [
+            "browser",
+            "vscode"
+          ],
+          "default": "vscode",
+          "description": "Where to open reports and the application (Browser or VS Code Simple Browser)"
+        }
+      }
+    },
     "menus": {
       "view/title": [
         {

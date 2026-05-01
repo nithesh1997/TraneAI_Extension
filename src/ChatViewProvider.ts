@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { exec } from 'child_process';
 import { buildWebviewHtml } from './webview/WebviewTemplate';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
@@ -57,6 +58,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				break;
 			case 'sendMessage':
 				this._addMessage('user', data.text);
+
+				if (data.text.includes('@comprehensive-review')) {
+					this._runComprehensiveReview();
+					return;
+				}
+
 				this._broadcastTyping(true);
 				setTimeout(() => {
 					this._broadcastTyping(false);
@@ -325,5 +332,79 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			isPanel,
 			isRedirected,
 		});
+	}
+
+	private _runComprehensiveReview() {
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders) {
+			vscode.window.showErrorMessage('No workspace folder open.');
+			return;
+		}
+
+		const rootPath = workspaceFolders[0].uri.fsPath;
+		const writeEmitter = new vscode.EventEmitter<string>();
+		
+		const pty: vscode.Pseudoterminal = {
+			onDidWrite: writeEmitter.event,
+			open: () => {
+				writeEmitter.fire('\x1b[34m--- TraneAI Comprehensive Review ---\x1b[0m\r\n');
+				writeEmitter.fire('\x1b[33mStep 1: Installing dependencies (npm i)...\x1b[0m\r\n');
+				
+				const installProcess = exec('npm i', { cwd: rootPath });
+				
+				installProcess.stdout?.on('data', (data) => {
+					writeEmitter.fire(data.toString().replace(/\n/g, '\r\n'));
+				});
+				
+				installProcess.stderr?.on('data', (data) => {
+					writeEmitter.fire(data.toString().replace(/\n/g, '\r\n'));
+				});
+				
+				installProcess.on('exit', (code) => {
+					if (code !== 0) {
+						writeEmitter.fire(`\r\n\x1b[31m[ERROR] npm install failed with code ${code}\x1b[0m\r\n`);
+						return;
+					}
+					
+					writeEmitter.fire('\r\n\x1b[33mStep 2: Starting application (npm start)...\x1b[0m\r\n');
+					
+					const startProcess = exec('npm start', { cwd: rootPath });
+					let hasOpenedUrl = false;
+					
+					startProcess.stdout?.on('data', (data) => {
+						const output = data.toString();
+						writeEmitter.fire(output.replace(/\n/g, '\r\n'));
+						
+						if (!hasOpenedUrl) {
+							const cleanOutput = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+							const urlMatch = cleanOutput.match(/https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[\w.-]+)(:\d+)?(\/[^\s]*)?/i);
+							if (urlMatch) {
+								const url = urlMatch[0].replace(/[.,!?;:]+$/, '');
+								hasOpenedUrl = true;
+								writeEmitter.fire(`\r\n\x1b[32m[INFO] Found hosting URL: ${url}\x1b[0m\r\n`);
+								writeEmitter.fire('\x1b[32m[INFO] Opening browser with URL...\x1b[0m\r\n');
+								
+								// Small delay to ensure server is ready
+								setTimeout(() => {
+									vscode.commands.executeCommand('trane-ai.openUrl', url);
+								}, 1500);
+							}
+						}
+					});
+					
+					startProcess.stderr?.on('data', (data) => {
+						writeEmitter.fire(data.toString().replace(/\n/g, '\r\n'));
+					});
+					
+					startProcess.on('error', (err) => {
+						writeEmitter.fire(`\r\n\x1b[31m[ERROR] npm start failed: ${err.message}\x1b[0m\r\n`);
+					});
+				});
+			},
+			close: () => {}
+		};
+
+		const terminal = vscode.window.createTerminal({ name: 'TraneAI Review', pty });
+		terminal.show();
 	}
 }

@@ -98,6 +98,16 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('trane-ai.closeChat', () => {
 			vscode.commands.executeCommand('workbench.action.closeSidebarPane');
+		}),
+		vscode.commands.registerCommand('trane-ai.openUrl', (url: string) => {
+			const config = vscode.workspace.getConfiguration('trane-ai');
+			const openIn = config.get<string>('openIn') || 'vscode';
+			
+			if (openIn === 'vscode') {
+				vscode.commands.executeCommand('simpleBrowser.show', vscode.Uri.parse(url));
+			} else {
+				vscode.env.openExternal(vscode.Uri.parse(url));
+			}
 		})
 	);
 
