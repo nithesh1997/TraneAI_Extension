@@ -1,0 +1,125 @@
+{
+  "name": "trane-ai",
+  "displayName": "TraneAI",
+  "description": "TraneAI VS Code Extension",
+  "version": "0.0.1",
+  "publisher": "trane-ai",
+  "icon": "resources/logo.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:traneai.chatView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "trane-ai-explorer",
+          "title": "TraneAI",
+          "icon": "resources/logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "trane-ai-explorer": [
+        {
+          "type": "webview",
+          "id": "traneai.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "trane-ai.newChat",
+        "title": "New Chat",
+        "icon": "$(add)"
+      },
+      {
+        "command": "trane-ai.openChatFullScreen",
+        "title": "Open Full Screen",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "trane-ai.restoreToSidebar",
+        "title": "Restore to Sidebar",
+        "icon": "$(screen-normal)"
+      },
+      {
+        "command": "trane-ai.closeChat",
+        "title": "Close Chat",
+        "icon": "$(close)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "trane-ai.newChat",
+          "when": "view == traneai.chatView && !traneai.isFullScreen",
+          "group": "navigation@1"
+        },
+        {
+          "command": "trane-ai.openChatFullScreen",
+          "when": "view == traneai.chatView && !traneai.isFullScreen",
+          "group": "navigation@2"
+        },
+        {
+          "command": "trane-ai.restoreToSidebar",
+          "when": "view == traneai.chatView && traneai.isFullScreen",
+          "group": "navigation@2"
+        },
+        {
+          "command": "trane-ai.closeChat",
+          "when": "view == traneai.chatView",
+          "group": "navigation@3"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "trane-ai.restoreToSidebar",
+          "when": "activeWebviewPanelId == 'traneai.chatFullScreen'",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "sass": "^1.77.0",
+    "@types/vscode": "^1.85.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "18.x",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0",
+    "esbuild": "^0.20.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.3.3",
+    "@vscode/test-cli": "^0.0.6",
+    "@vscode/test-electron": "^2.3.8"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

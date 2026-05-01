@@ -1,0 +1,329 @@
+import * as vscode from 'vscode';
+import { buildWebviewHtml } from './webview/WebviewTemplate';
+
+export class ChatViewProvider implements vscode.WebviewViewProvider {
+	public static readonly viewType = 'traneai.chatView';
+	private _view?: vscode.WebviewView;
+	private _panel?: vscode.WebviewPanel;
+	private _isFullScreenActive = false;
+	private _messages: { role: string, text: string, timestamp: number }[] = [];
+
+	constructor(private readonly _extensionUri: vscode.Uri) {}
+
+	public resolveWebviewView(
+		webviewView: vscode.WebviewView,
+		context: vscode.WebviewViewResolveContext,
+		_token: vscode.CancellationToken,
+	) {
+		this._view = webviewView;
+
+		webviewView.webview.options = {
+			enableScripts: true,
+			localResourceRoots: [this._extensionUri]
+		};
+
+		webviewView.webview.html = this._getHtmlForWebview(webviewView.webview, false, this._isFullScreenActive);
+
+		webviewView.webview.onDidReceiveMessage(data => {
+			this._handleMessage(data);
+		});
+
+		this._syncMessages();
+	}
+
+	public setFullScreen(value: boolean) {
+		this._isFullScreenActive = value;
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'setFullScreen', value });
+		}
+		if (!value && this._panel) {
+			this._panel.dispose();
+		}
+	}
+
+	public refresh() {
+		if (this._view) {
+			this._view.webview.html = this._getHtmlForWebview(this._view.webview, false, this._isFullScreenActive);
+		}
+		if (this._panel) {
+			this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, true, false);
+		}
+	}
+
+	private _handleMessage(data: any) {
+		switch (data.command) {
+			case 'restore':
+				vscode.commands.executeCommand('trane-ai.restoreToSidebar');
+				break;
+			case 'sendMessage':
+				this._addMessage('user', data.text);
+				this._broadcastTyping(true);
+				setTimeout(() => {
+					this._broadcastTyping(false);
+					this._addMessage('ai', 'I am TraneAI. How can I help you today?');
+				}, 1200);
+				break;
+			case 'quickAction':
+				this._handleQuickAction(data.action, data.text);
+				break;
+			case 'clearChat':
+				this._messages = [];
+				this._syncMessages();
+				break;
+			case 'copyMessage':
+				vscode.env.clipboard.writeText(data.text);
+				break;
+			case 'filesSelected':
+				break;
+		}
+	}
+
+	private _broadcastTyping(isTyping: boolean) {
+		const msg = { type: 'typing', value: isTyping };
+		if (this._view) { this._view.webview.postMessage(msg); }
+		if (this._panel) { this._panel.webview.postMessage(msg); }
+	}
+
+	private _addMessage(role: string, text: string) {
+		this._messages.push({ role, text, timestamp: Date.now() });
+		this._syncMessages();
+	}
+
+	private _syncMessages() {
+		const message = { type: 'syncMessages', messages: this._messages };
+		if (this._view) { this._view.webview.postMessage(message); }
+		if (this._panel) { this._panel.webview.postMessage(message); }
+	}
+
+	public renderFullScreen(): vscode.WebviewPanel {
+		this._panel = vscode.window.createWebviewPanel(
+			'traneai.chatFullScreen',
+			'TraneAI Chat',
+			vscode.ViewColumn.One,
+			{
+				enableScripts: true,
+				localResourceRoots: [this._extensionUri]
+			}
+		);
+
+		this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, true, false);
+
+		this._panel.webview.onDidReceiveMessage(data => {
+			this._handleMessage(data);
+		});
+
+		this._panel.onDidDispose(() => {
+			this._panel = undefined;
+		});
+
+		this._syncMessages();
+
+		return this._panel;
+	}
+
+	private async _handleQuickAction(action: string, text: string) {
+		const editor = vscode.window.activeTextEditor;
+
+		if (!editor) {
+			this._addMessage('user', text);
+			this._broadcastTyping(true);
+			setTimeout(() => {
+				this._broadcastTyping(false);
+				this._addMessage('ai', 'No file is currently open. Please open a file in the editor and try again.');
+			}, 800);
+			return;
+		}
+
+		const document = editor.document;
+		const fileName = document.fileName.split(/[\\/]/).pop() ?? 'file';
+		const language = document.languageId;
+		const fileContent = document.getText();
+		const lineCount = document.lineCount;
+
+		this._addMessage('user', text);
+		this._broadcastTyping(true);
+
+		setTimeout(() => {
+			this._broadcastTyping(false);
+			let response = '';
+			if (action === 'explain') {
+				response = this._generateExplanation(fileName, language, fileContent, lineCount);
+			} else if (action === 'review') {
+				response = this._generateReview(fileName, language, fileContent, lineCount);
+			} else if (action === 'tests') {
+				response = this._generateTests(fileName, language, fileContent, lineCount);
+			}
+			this._addMessage('ai', response);
+		}, 1500);
+	}
+
+	private _extractSymbols(content: string, language: string): { functions: string[], classes: string[], imports: string[] } {
+		const functions: string[] = [];
+		const classes: string[] = [];
+		const imports: string[] = [];
+
+		if (['typescript', 'javascript', 'typescriptreact', 'javascriptreact'].includes(language)) {
+			const fnMatches = content.matchAll(/(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(|(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\w[\w<>, |[\]]*?)?\s*\{)/gm);
+			for (const m of fnMatches) {
+				const name = m[1] || m[2] || m[3];
+				if (name && name !== 'if' && name !== 'for' && name !== 'while' && name !== 'switch' && !functions.includes(name)) {
+					functions.push(name);
+				}
+			}
+			const classMatches = content.matchAll(/class\s+(\w+)/gm);
+			for (const m of classMatches) { if (!classes.includes(m[1])) { classes.push(m[1]); } }
+			const importMatches = content.matchAll(/import\s+.*?from\s+['"]([^'"]+)['"]/gm);
+			for (const m of importMatches) { if (!imports.includes(m[1])) { imports.push(m[1]); } }
+		} else if (language === 'python') {
+			const fnMatches = content.matchAll(/def\s+(\w+)\s*\(/gm);
+			for (const m of fnMatches) { if (!functions.includes(m[1])) { functions.push(m[1]); } }
+			const classMatches = content.matchAll(/class\s+(\w+)/gm);
+			for (const m of classMatches) { if (!classes.includes(m[1])) { classes.push(m[1]); } }
+			const importMatches = content.matchAll(/(?:import|from)\s+([\w.]+)/gm);
+			for (const m of importMatches) { if (!imports.includes(m[1])) { imports.push(m[1]); } }
+		} else if (['java', 'csharp', 'cpp', 'c'].includes(language)) {
+			const fnMatches = content.matchAll(/(?:public|private|protected|static|void|int|string|bool|double|float|async)[\s\w<>[\],]*?\s+(\w+)\s*\(/gm);
+			for (const m of fnMatches) {
+				const name = m[1];
+				if (name && name !== 'if' && name !== 'for' && name !== 'while' && !functions.includes(name)) {
+					functions.push(name);
+				}
+			}
+			const classMatches = content.matchAll(/class\s+(\w+)/gm);
+			for (const m of classMatches) { if (!classes.includes(m[1])) { classes.push(m[1]); } }
+		}
+
+		return { functions: functions.slice(0, 10), classes: classes.slice(0, 5), imports: imports.slice(0, 8) };
+	}
+
+	private _generateExplanation(fileName: string, language: string, content: string, lineCount: number): string {
+		const { functions, classes, imports } = this._extractSymbols(content, language);
+		const langLabel = language === 'typescriptreact' ? 'TypeScript (React)' : language === 'javascriptreact' ? 'JavaScript (React)' : language.charAt(0).toUpperCase() + language.slice(1);
+
+		let response = `**File:** \`${fileName}\`\n**Language:** ${langLabel}\n**Lines:** ${lineCount}\n\n`;
+
+		if (classes.length > 0) {
+			response += `**Classes:**\n${classes.map(c => `- \`${c}\``).join('\n')}\n\n`;
+		}
+		if (functions.length > 0) {
+			response += `**Functions / Methods:**\n${functions.map(f => `- \`${f}\``).join('\n')}\n\n`;
+		}
+		if (imports.length > 0) {
+			response += `**Dependencies:**\n${imports.map(i => `- \`${i}\``).join('\n')}\n\n`;
+		}
+
+		if (content.trim().length === 0) {
+			response += '_The file appears to be empty._';
+		} else if (functions.length === 0 && classes.length === 0) {
+			response += '_No top-level functions or classes detected. The file may contain configuration, styles, or data definitions._';
+		} else {
+			response += `This file defines **${classes.length} class${classes.length !== 1 ? 'es' : ''}** and **${functions.length} function${functions.length !== 1 ? 's' : ''}**. Review the symbols above to understand its responsibilities.`;
+		}
+
+		return response;
+	}
+
+	private _generateReview(fileName: string, language: string, content: string, lineCount: number): string {
+		const issues: string[] = [];
+		const suggestions: string[] = [];
+
+		if (content.includes('console.log') || content.includes('console.error') || content.includes('print(')) {
+			issues.push('Debug logging statements detected — consider removing before production.');
+		}
+		if (content.includes('TODO') || content.includes('FIXME') || content.includes('HACK')) {
+			issues.push('Unresolved `TODO` / `FIXME` / `HACK` comments found in the code.');
+		}
+		if (/password|secret|apikey|api_key|token/i.test(content) && /['"][A-Za-z0-9+/=]{8,}['"]/.test(content)) {
+			issues.push('Possible hardcoded credentials or secrets detected — use environment variables instead.');
+		}
+		if (content.includes('any') && ['typescript', 'typescriptreact'].includes(language)) {
+			issues.push('Usage of `any` type found — prefer explicit types for better type safety.');
+		}
+		if (/catch\s*\([^)]*\)\s*\{\s*\}/.test(content) || /catch\s*\([^)]*\)\s*\{\s*\/\//.test(content)) {
+			issues.push('Empty or comment-only `catch` blocks detected — ensure errors are handled or logged.');
+		}
+
+		const { functions } = this._extractSymbols(content, language);
+		if (lineCount > 300) {
+			suggestions.push(`File is **${lineCount} lines** — consider splitting into smaller, focused modules.`);
+		}
+		if (functions.length > 15) {
+			suggestions.push(`**${functions.length} functions** detected — consider grouping related logic into classes or separate files.`);
+		}
+		if (!content.includes('test') && !content.includes('spec') && !content.includes('describe')) {
+			suggestions.push('No test coverage detected in this file — consider adding unit tests.');
+		}
+
+		let response = `**Code Review — \`${fileName}\`**\n\n`;
+
+		if (issues.length > 0) {
+			response += `**Issues Found:**\n${issues.map(i => `- ⚠️ ${i}`).join('\n')}\n\n`;
+		} else {
+			response += `**Issues Found:** ✅ No obvious issues detected.\n\n`;
+		}
+
+		if (suggestions.length > 0) {
+			response += `**Suggestions:**\n${suggestions.map(s => `- 💡 ${s}`).join('\n')}\n\n`;
+		}
+
+		response += `**Summary:** ${lineCount} lines of ${language} code reviewed. ${issues.length} issue${issues.length !== 1 ? 's' : ''} and ${suggestions.length} suggestion${suggestions.length !== 1 ? 's' : ''} found.`;
+
+		return response;
+	}
+
+	private _generateTests(fileName: string, language: string, content: string, lineCount: number): string {
+		const { functions, classes } = this._extractSymbols(content, language);
+		const baseName = fileName.replace(/\.[^.]+$/, '');
+
+		let testCode = '';
+		let framework = '';
+
+		if (['typescript', 'typescriptreact', 'javascript', 'javascriptreact'].includes(language)) {
+			framework = 'Jest';
+			const ext = language.startsWith('typescript') ? 'ts' : 'js';
+			const imports = classes.length > 0
+				? `import { ${[...classes, ...functions].slice(0, 5).join(', ')} } from './${baseName}';`
+				: `import { ${functions.slice(0, 5).join(', ')} } from './${baseName}';`;
+
+			const testBlocks = functions.slice(0, 5).map(fn => `  describe('${fn}', () => {\n    it('should work correctly', () => {\n      // TODO: implement test\n      expect(${fn}).toBeDefined();\n    });\n  });`).join('\n\n');
+
+			testCode = `// ${baseName}.test.${ext}\n${imports}\n\ndescribe('${baseName}', () => {\n${testBlocks || '  it(\'should be defined\', () => {\n    // TODO: implement test\n  });'}\n});`;
+		} else if (language === 'python') {
+			framework = 'pytest';
+			const importLine = `from ${baseName} import ${functions.slice(0, 5).join(', ') || '*'}`;
+			const testFns = functions.slice(0, 5).map(fn => `def test_${fn}():\n    # TODO: implement test\n    assert ${fn} is not None`).join('\n\n');
+			testCode = `# test_${baseName}.py\n${importLine}\n\n${testFns || 'def test_placeholder():\n    # TODO: implement test\n    pass'}`;
+		} else if (language === 'java') {
+			framework = 'JUnit 5';
+			const className = classes[0] ?? baseName;
+			const testMethods = functions.slice(0, 5).map(fn => `  @Test\n  void test${fn.charAt(0).toUpperCase() + fn.slice(1)}() {\n    // TODO: implement test\n  }`).join('\n\n');
+			testCode = `// ${className}Test.java\nimport org.junit.jupiter.api.Test;\nimport static org.junit.jupiter.api.Assertions.*;\n\nclass ${className}Test {\n${testMethods || '  @Test\n  void testPlaceholder() {\n    // TODO: implement test\n  }'}\n}`;
+		} else {
+			return `**Generate Unit Tests — \`${fileName}\`**\n\nUnit test generation for **${language}** is not yet supported. Detected **${functions.length} function${functions.length !== 1 ? 's' : ''}**:\n${functions.map(f => `- \`${f}\``).join('\n') || '_No functions detected._'}`;
+		}
+
+		let response = `**Generated Unit Tests — \`${fileName}\`** (${framework})\n\n`;
+		response += `Detected **${functions.length} function${functions.length !== 1 ? 's' : ''}** and **${classes.length} class${classes.length !== 1 ? 'es' : ''}**.\n\n`;
+		response += `\`\`\`${language}\n${testCode}\n\`\`\`\n\n`;
+		response += `_Tests generated as stubs — fill in the assertions and edge cases based on your implementation._`;
+
+		return response;
+	}
+
+	private _getHtmlForWebview(webview: vscode.Webview, isPanel: boolean, isRedirected: boolean) {
+		const logoUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'resources', 'logo.svg'));
+		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'resources', 'webview', 'style.css'));
+		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'resources', 'webview', 'main.js'));
+
+		// Add cache buster for development
+		const cacheBuster = `?t=${Date.now()}`;
+
+		return buildWebviewHtml({
+			logoUri: logoUri.toString(),
+			styleUri: styleUri.toString() + cacheBuster,
+			scriptUri: scriptUri.toString() + cacheBuster,
+			isPanel,
+			isRedirected,
+		});
+	}
+}
