@@ -5,11 +5,6 @@ node_modules/
 dist/
 out/
 
-# VS Code
-.vscode-test/
-.history/
-*.vsix
-
 # Logs
 *.log
 npm-debug.log*
