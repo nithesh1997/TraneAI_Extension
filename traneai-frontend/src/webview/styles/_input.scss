@@ -19,7 +19,8 @@
   border-radius: 12px;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  position: relative;
 
   &:focus-within {
     border-color: var(--border-focus);
@@ -300,4 +301,75 @@ textarea {
   font-size: 9px;
   color: var(--text-muted);
   font-family: inherit;
+}
+
+// Attached files styles
+.attached-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px 4px 12px;
+
+  .file-chip {
+    position: relative;
+
+    .remove-file {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 2px;
+      margin-left: 2px;
+      display: flex;
+      align-items: center;
+      border-radius: 4px;
+      transition: background 0.15s, color 0.15s;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--danger);
+      }
+    }
+
+    .chip-tooltip {
+      visibility: hidden;
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 0;
+      background-color: #1e1e1e;
+      color: #cccccc;
+      text-align: left;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      white-space: nowrap;
+      z-index: 1001;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      border: 1px solid var(--border);
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+
+      &::after {
+        content: "";
+        position: absolute;
+        top: 100%;
+        left: 14px;
+        border-width: 5px;
+        border-style: solid;
+        border-color: #1e1e1e transparent transparent transparent;
+      }
+    }
+
+    &.terminal .file-name:hover .chip-tooltip {
+      visibility: visible;
+      opacity: 1;
+    }
+  }
+}
+
+.attachment-selector {
+  position: relative;
+  display: flex;
+  align-items: center;
 }

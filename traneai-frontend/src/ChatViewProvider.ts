@@ -7,7 +7,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	private _view?: vscode.WebviewView;
 	private _panel?: vscode.WebviewPanel;
 	private _isFullScreenActive = false;
-	private _messages: { role: string, text: string, timestamp: number }[] = [];
+	private _messages: { role: string, text: string, timestamp: number, attachments?: any[] }[] = [];
 
 	constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -57,7 +57,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				vscode.commands.executeCommand('trane-ai.restoreToSidebar');
 				break;
 			case 'sendMessage':
-				this._addMessage('user', data.text);
+				this._addMessage('user', data.text, data.attachments);
 
 				if (data.text.includes('@comprehensive-review')) {
 					this._runComprehensiveReview();
@@ -91,8 +91,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		if (this._panel) { this._panel.webview.postMessage(msg); }
 	}
 
-	private _addMessage(role: string, text: string) {
-		this._messages.push({ role, text, timestamp: Date.now() });
+	private _addMessage(role: string, text: string, attachments?: any[]) {
+		this._messages.push({ role, text, timestamp: Date.now(), attachments });
 		this._syncMessages();
 	}
 

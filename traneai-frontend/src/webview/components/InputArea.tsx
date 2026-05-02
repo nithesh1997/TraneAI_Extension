@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Attachment } from './Message';
 
 interface InputAreaProps {
-	onSendMessage: (text: string, model: string, files: string[]) => void;
+	onSendMessage: (text: string, model: string, attachments: Attachment[]) => void;
 	onFilesSelected: (files: string[]) => void;
 	currentModel: string;
 	onModelChange: (model: string) => void;
+	terminalPath?: string;
 }
 
 const MODELS = [
@@ -45,11 +47,12 @@ const MODE_SKILLS: Record<string, string[]> = {
 	'automated-testing': ['playwright']
 };
 
-export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSelected, currentModel, onModelChange }) => {
+export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath }) => {
 	const [text, setText] = useState('');
 	const [showModelDropdown, setShowModelDropdown] = useState(false);
 	const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
-	const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+	const [showAttachmentDropdown, setShowAttachmentDropdown] = useState(false);
+	const [attachedFiles, setAttachedFiles] = useState<Attachment[]>([]);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -68,13 +71,15 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 	};
 
 	const handleSend = () => {
-		if (!text.trim()) return;
+		if (!text.trim() && attachedFiles.length === 0) return;
 		
 		// Add selected mode as a skill if not already present in the text
 		let finalChatText = text;
 		const modeSkill = `@${currentModel}`;
-		if (!text.includes(modeSkill) && currentModel !== 'auto') {
+		if (text.trim() && !text.includes(modeSkill) && currentModel !== 'auto') {
 			finalChatText = `${modeSkill} ${text}`;
+		} else if (!text.trim() && currentModel !== 'auto') {
+			finalChatText = `${modeSkill}`;
 		}
 
 		onSendMessage(finalChatText, currentModel, attachedFiles);
@@ -87,11 +92,22 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const files = Array.from(e.target.files || []);
-		const newFiles = files.map(f => f.name);
+		const newFiles: Attachment[] = files.map(f => ({
+			name: f.name,
+			path: f.name, // In a real app this would be the full path
+			type: 'file'
+		}));
 		const updatedFiles = [...attachedFiles, ...newFiles];
 		setAttachedFiles(updatedFiles);
-		onFilesSelected(updatedFiles);
+		onFilesSelected(updatedFiles.map(f => f.name));
 		e.target.value = '';
+		setShowAttachmentDropdown(false);
+	};
+
+	const removeFile = (index: number) => {
+		const updatedFiles = attachedFiles.filter((_, i) => i !== index);
+		setAttachedFiles(updatedFiles);
+		onFilesSelected(updatedFiles.map(f => f.name));
 	};
 
 	const selectSkill = (skill: string) => {
@@ -105,9 +121,19 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 	const counterClass = charCount > 1000 ? 'danger' : charCount > 800 ? 'warn' : '';
 
 	useEffect(() => {
+		const currentModelData = MODELS.find(m => m.id === currentModel);
+		if (currentModelData?.canAttachFiles === false && attachedFiles.length > 0) {
+			setAttachedFiles([]);
+			onFilesSelected([]);
+		}
+	}, [currentModel]);
+
+	useEffect(() => {
 		const handleClickOutside = (e: MouseEvent) => {
-			if (!(e.target as HTMLElement).closest('.model-selector')) setShowModelDropdown(false);
-			if (!(e.target as HTMLElement).closest('.skills-selector')) setShowSkillsDropdown(false);
+			const target = e.target as HTMLElement;
+			if (!target.closest('.model-selector')) setShowModelDropdown(false);
+			if (!target.closest('.skills-selector')) setShowSkillsDropdown(false);
+			if (!target.closest('.attachment-selector')) setShowAttachmentDropdown(false);
 		};
 		window.addEventListener('click', handleClickOutside);
 		return () => window.removeEventListener('click', handleClickOutside);
@@ -120,6 +146,34 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 	return (
 		<div className="input-area">
 			<div className="input-container">
+				{attachedFiles.length > 0 && (
+					<div className="attached-files">
+						{attachedFiles.map((file, index) => (
+							<div key={index} className={`file-chip ${file.type}`}>
+								{file.type === 'terminal' ? (
+									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+										<path d="M2 4h12v8H2V4z" stroke="currentColor" strokeWidth="1.2" />
+										<path d="M4 8h1M6 8h3" stroke="currentColor" strokeWidth="1.2" />
+									</svg>
+								) : (
+									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+										<path d="M3 3h10v10H3V3z" stroke="currentColor" strokeWidth="1.2" />
+										<path d="M7 3v10M3 7h10" stroke="currentColor" strokeWidth="1.2" />
+									</svg>
+								)}
+								<span className="file-name">
+									{file.name}
+									{file.type === 'terminal' && <div className="chip-tooltip">{file.path}</div>}
+								</span>
+								<button className="remove-file" onClick={() => removeFile(index)}>
+									<svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+										<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+									</svg>
+								</button>
+							</div>
+						))}
+					</div>
+				)}
 				<textarea
 					ref={textareaRef}
 					id="chat-input"
@@ -136,11 +190,35 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 				<div className="controls">
 					<div className="left-controls">
 						{canAttach && (
-							<button className="icon-btn" title="Attach file" onClick={() => fileInputRef.current?.click()}>
-								<svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-									<path d="M13 8.5V11a4 4 0 01-8 0V4.5a2.5 2.5 0 015 0V11a1 1 0 01-2 0V5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-								</svg>
-							</button>
+							<div className="attachment-selector">
+								<button 
+									className={`icon-btn ${showAttachmentDropdown ? 'active' : ''}`} 
+									title="Attach" 
+									onClick={(e) => { e.stopPropagation(); setShowAttachmentDropdown(!showAttachmentDropdown); setShowModelDropdown(false); setShowSkillsDropdown(false); }}
+								>
+									<svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+										<path d="M13 8.5V11a4 4 0 01-8 0V4.5a2.5 2.5 0 015 0V11a1 1 0 01-2 0V5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+									</svg>
+								</button>
+								{showAttachmentDropdown && (
+									<div className="dropdown-menu show" id="attachment-dropdown">
+										<div className="dropdown-item" onClick={() => fileInputRef.current?.click()}>
+											<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+												<path d="M2 3a1 1 0 011-1h6l4 4v7a1 1 0 01-1 1H3a1 1 0 01-1-1V3z" stroke="currentColor" strokeWidth="1.2" />
+											</svg>
+											Files and images
+											<span className="item-check">›</span>
+										</div>
+										<div className="dropdown-item">
+											<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+												<path d="M2 8l4 4 8-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+											</svg>
+											Jira
+											<span className="item-check">›</span>
+										</div>
+									</div>
+								)}
+							</div>
 						)}
 						<input type="file" ref={fileInputRef} id="file-input" style={{ display: 'none' }} multiple onChange={handleFileChange} />
 
@@ -193,7 +271,7 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 					</div>
 
 					<div className="right-controls">
-						<button className="send-btn" id="send-btn" onClick={handleSend} disabled={!text.trim()}>
+						<button className="send-btn" id="send-btn" onClick={handleSend} disabled={!text.trim() && attachedFiles.length === 0}>
 							<svg width="13" height="13" viewBox="0 0 16 16" fill="none">
 								<path d="M8 13V3M8 3L4 7M8 3l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
 							</svg>

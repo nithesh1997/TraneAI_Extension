@@ -1,9 +1,16 @@
 import React from 'react';
 
+export interface Attachment {
+	name: string;
+	path: string;
+	type: 'file' | 'terminal';
+}
+
 export interface MessageData {
 	role: 'user' | 'assistant';
 	text: string;
 	timestamp: number;
+	attachments?: Attachment[];
 }
 
 interface MessageProps {
@@ -49,6 +56,26 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy }) =>
 					<span className="msg-time">{isUser ? '3m ago' : formatTime(message.timestamp)}</span>
 				</div>
 				<div className="msg-bubble">
+					{message.attachments && message.attachments.length > 0 && (
+						<div className="file-chips">
+							{message.attachments.map((file, index) => (
+								<div key={index} className={`file-chip ${file.type}`}>
+									{file.type === 'terminal' ? (
+										<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+											<path d="M2 4h12v8H2V4z" stroke="currentColor" strokeWidth="1.2" />
+											<path d="M4 8h1M6 8h3" stroke="currentColor" strokeWidth="1.2" />
+										</svg>
+									) : (
+										<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+											<path d="M3 3h10v10H3V3z" stroke="currentColor" strokeWidth="1.2" />
+											<path d="M7 3v10M3 7h10" stroke="currentColor" strokeWidth="1.2" />
+										</svg>
+									)}
+									<span className="file-name">{file.name}</span>
+								</div>
+							))}
+						</div>
+					)}
 					<div className="msg-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) }}></div>
 				</div>
 				{!isUser && (

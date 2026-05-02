@@ -6,7 +6,7 @@ import { InputArea } from './components/InputArea';
 import { TypingIndicator } from './components/TypingIndicator';
 import { RedirectScreen } from './components/RedirectScreen';
 import { ChatFooter } from './components/ChatFooter';
-import { MessageData } from './components/Message';
+import { MessageData, Attachment } from './components/Message';
 
 declare const vscode: any;
 declare const LOGO_URI: string;
@@ -37,8 +37,8 @@ export const App: React.FC = () => {
 		return () => window.removeEventListener('message', handleMessage);
 	}, []);
 
-	const handleSendMessage = (text: string, model: string, files: string[]) => {
-		vscode.postMessage({ command: 'sendMessage', text, model, files });
+	const handleSendMessage = (text: string, model: string, attachments: Attachment[]) => {
+		vscode.postMessage({ command: 'sendMessage', text, model, attachments });
 	};
 
 	const handleFilesSelected = (files: string[]) => {
