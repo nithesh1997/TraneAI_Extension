@@ -1,0 +1,22 @@
+{
+  "name": "traneai-extension",
+  "version": "1.0.0",
+  "description": "TraneAI - VS Code Extension with Backend API",
+  "private": true,
+"scripts": {
+    "dev": "npx concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd traneai_backend && npm run dev",
+    "dev:frontend": "cd traneai-frontend && npm run watch",
+    "dev:all": "npm run dev:backend & sleep 3 && (code --new-window traneai-frontend & sleep 2 && xdotool key F5 2>/dev/null || echo 'xdotool not installed, press F5 manually')",
+    "build": "npm run build:backend && npm run build:frontend",
+    "build:backend": "cd traneai_backend && npm run build",
+    "build:frontend": "cd traneai-frontend && npm run compile",
+    "clean": "npm run clean:backend && npm run clean:frontend",
+    "clean:backend": "cd traneai_backend && rm -rf dist",
+    "clean:frontend": "cd traneai-frontend && rm -rf dist",
+    "install:all": "npm install && cd traneai_backend && npm install && cd ../traneai-frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
