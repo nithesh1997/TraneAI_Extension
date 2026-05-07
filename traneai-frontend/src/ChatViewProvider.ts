@@ -7,7 +7,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	private _view?: vscode.WebviewView;
 	private _panel?: vscode.WebviewPanel;
 	private _isFullScreenActive = false;
-	private _messages: { role: string, text: string, timestamp: number, attachments?: any[] }[] = [];
+private _messages: { role: string, text: string, timestamp: number, attachments?: any[], id?: string, isStreaming?: boolean }[] = [];
 
 	constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -65,10 +65,34 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				}
 
 				this._broadcastTyping(true);
-				setTimeout(() => {
+				this._sendToBackend(data.text, data.attachments).then((aiReply: string) => {
 					this._broadcastTyping(false);
-					this._addMessage('ai', 'I am TraneAI. How can I help you today?');
-				}, 1200);
+					const streamId = `ai-${Date.now()}`;
+					this._addMessage('ai', '', undefined, streamId, true);
+					let pos = 0;
+					const interval = setInterval(() => {
+					  if (pos >= aiReply.length) {
+						clearInterval(interval);
+						const index = this._messages.findIndex((m: any) => m.id === streamId);
+						if (index !== -1) {
+						  this._messages[index].isStreaming = false;
+						  this._syncMessages();
+						}
+						return;
+					  }
+					  pos += 1;
+					  const newText = aiReply.slice(0, pos);
+					  const index = this._messages.findIndex((m: any) => m.id === streamId);
+					  if (index !== -1) {
+						this._messages[index] = { ...this._messages[index]!, text: newText } as any;
+						this._syncMessages();
+					  }
+					}, 25);
+				}).catch((error: any) => {
+					this._broadcastTyping(false);
+					this._addMessage('ai', `Error: ${error.message}`);
+				});
+
 				break;
 			case 'quickAction':
 				this._handleQuickAction(data.action, data.text);
@@ -91,8 +115,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		if (this._panel) { this._panel.webview.postMessage(msg); }
 	}
 
-	private _addMessage(role: string, text: string, attachments?: any[]) {
-		this._messages.push({ role, text, timestamp: Date.now(), attachments });
+	private _addMessage(role: string, text: string, attachments?: any[], id: string = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, isStreaming = false) {
+		this._messages.push({ role, text, timestamp: Date.now(), attachments, id, isStreaming });
 		this._syncMessages();
 	}
 
@@ -230,6 +254,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		return response;
 	}
 
+	private async _sendToBackend(message: string, attachments?: any[]): Promise<string> {
+		try {
+			const formData = new FormData();
+			formData.append('message', message);
+			const response = await fetch('http://localhost:5000/api/chat/message', {
+				method: 'POST',
+				body: formData,
+			});
+
+			if (!response.ok) {
+				throw new Error(`API failed with status ${response.status}`);
+			}
+
+			const data = await response.json();
+
+			return data.message || 'No response from AI.';
+		} catch (error: any) {
+			console.error('TraneAI API Error:', error);
+			return `Backend API error: ${error.message || 'Something went wrong'}`;
+		}
+	}
 	private _generateReview(fileName: string, language: string, content: string, lineCount: number): string {
 		const issues: string[] = [];
 		const suggestions: string[] = [];

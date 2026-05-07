@@ -1,16 +1,18 @@
 import React from 'react';
 
-export interface Attachment {
-	name: string;
-	path: string;
-	type: 'file' | 'terminal';
-}
-
+export type Attachment = {
+  name: string;
+  path?: string;
+  file?: File;
+  type: 'file' | 'terminal';
+};
 export interface MessageData {
 	role: 'user' | 'assistant';
 	text: string;
 	timestamp: number;
 	attachments?: Attachment[];
+	id?: string;
+	isStreaming?: boolean;
 }
 
 interface MessageProps {
@@ -68,7 +70,7 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy }) =>
 									) : (
 										<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
 											<path d="M3 3h10v10H3V3z" stroke="currentColor" strokeWidth="1.2" />
-											<path d="M7 3v10M3 7h10" stroke="currentColor" strokeWidth="1.2" />
+											<path d="M7 3v10M Asc 7h10" stroke="currentColor" strokeWidth="1.2" />
 										</svg>
 									)}
 									<span className="file-name">{file.name}</span>
@@ -76,7 +78,7 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy }) =>
 							))}
 						</div>
 					)}
-					<div className="msg-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) }}></div>
+					<div className={`msg-text ${message.role === 'assistant' && message.isStreaming ? 'streaming' : ''}`} dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) + (message.role === 'assistant' && message.isStreaming ? '<span class="cursor">|</span>' : '') }}></div>
 				</div>
 				{!isUser && (
 					<div className="msg-actions">

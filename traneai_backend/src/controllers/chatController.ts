@@ -1,34 +1,33 @@
 import { Request, Response } from 'express';
-import { Message, ChatRequest, ChatResponse, QuickActionRequest, QuickActionResponse } from '../types/index.js';
-import { generateAIResponse } from '../services/aiService.js';
+import fs from 'fs';
+import { ChatRequest, QuickActionRequest } from '../types/index.js';
+import { generateAIResponse, generateVisionResponse } from '../services/aiService.js';
 import { generateExplanation, generateReview, generateTests } from '../services/codeAnalysisService.js';
-
-function createMessage(role: 'user' | 'ai', text: string): Message {
-  return {
-    id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    role,
-    text,
-    timestamp: Date.now()
-  };
-}
 
 export async function handleChatMessage(req: Request, res: Response): Promise<void> {
   try {
-    const { message, model, context } = req.body as ChatRequest;
-
+    if (req.file) {
+      const userInput = req.body.message;
+      if (!userInput) {
+        res.status(400).json({ error: 'Message required with image' });
+        return;
+      }
+      const imagePath = req.file.path;
+      const imageBuffer = fs.readFileSync(imagePath);
+      const base64Image = imageBuffer.toString('base64');
+      const mimeType = req.file.mimetype || 'image/jpeg';
+      const reply = await generateVisionResponse(userInput, base64Image, mimeType);
+      fs.unlinkSync(imagePath);
+      res.json({ message: reply });
+      return;
+    }
+    const { message, context } = req.body as ChatRequest;
     if (!message || typeof message !== 'string') {
       res.status(400).json({ error: 'Message is required' });
       return;
     }
-
-    const aiResponse = await generateAIResponse(message, model, context);
-    const responseMessage = createMessage('ai', aiResponse);
-
-    const chatResponse: ChatResponse = {
-      message: responseMessage
-    };
-
-    res.json(chatResponse);
+    const reply = await generateAIResponse(message, context);
+    res.json({ message: reply });
   } catch (error) {
     console.error('Chat error:', error);
     res.status(500).json({ error: 'Failed to process message' });
@@ -44,7 +43,7 @@ export async function handleQuickAction(req: Request, res: Response): Promise<vo
       return;
     }
 
-    let responseText: string;
+    let responseText = '';
     let codeBlock: string | undefined;
     let codeLanguage: string | undefined;
 
@@ -55,26 +54,23 @@ export async function handleQuickAction(req: Request, res: Response): Promise<vo
       case 'review':
         responseText = generateReview(fileName, language, content, lineCount);
         break;
-      case 'tests':
+      case 'tests': {
         const result = generateTests(fileName, language, content, lineCount);
         responseText = result.text;
         codeBlock = result.code;
         codeLanguage = result.language;
         break;
+      }
       default:
         res.status(400).json({ error: 'Invalid action' });
         return;
     }
 
-    const responseMessage = createMessage('ai', responseText);
-
-    const quickActionResponse: QuickActionResponse = {
-      message: responseMessage,
+    res.json({
+      message: responseText,
       codeBlock,
-      language: codeLanguage
-    };
-
-    res.json(quickActionResponse);
+      language: codeLanguage,
+    });
   } catch (error) {
     console.error('Quick action error:', error);
     res.status(500).json({ error: 'Failed to process quick action' });

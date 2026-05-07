@@ -1,38 +1,73 @@
-import { Router } from 'express';
+import express from 'express';
+import multer from 'multer';
 import { handleChatMessage, handleQuickAction } from '../controllers/chatController.js';
 
-const router = Router();
+const router = express.Router();
+
+const upload = multer({ dest: 'uploads/' });
 
 /**
- * POST /api/chat/message
- * @summary Send a chat message
- * @tags Chat
- * @param {object} request.body - Chat message request
- * @return {object} 200 - Success response
- * @return {object} 400 - Bad request
- * @return {object} 500 - Server error
+ * @swagger
+ * /api/chat/message:
+ *   post:
+ *     summary: Send message or image+text to TraneAI chatbot
+ *     tags:
+ *       - Chat
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ChatRequest'
+ *         'multipart/form-data':
+ *           schema:
+ *             type: object
+ *             properties:
+ *               message:
+ *                 type: string
+ *                 description: User text input (required for both text and vision)
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *                 description: Optional image file for vision analysis
+ *     responses:
+ *       200:
+ *         description: AI response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ChatResponse'
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
-router.post('/message', handleChatMessage);
+router.post('/message', upload.single('image'), handleChatMessage);
 
 /**
- * POST /api/chat/quick-action
- * @summary Execute a quick action (explain, review, or generate tests)
- * @tags Quick Actions
- * @param {object} request.body - Quick action request
- * @return {object} 200 - Success response with code block
- * @return {object} 400 - Bad request
- * @return {object} 500 - Server error
+ * @swagger
+ * /api/chat/quick-action:
+ *   post:
+ *     summary: Run quick code action
+ *     tags:
+ *       - Chat
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/QuickActionRequest'
+ *     responses:
+ *       200:
+ *         description: Quick action response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/QuickActionResponse'
  */
 router.post('/quick-action', handleQuickAction);
 
-/**
- * GET /api/chat/history
- * @summary Get chat history
- * @tags Chat
- * @return {object} 200 - Success response
- */
-router.get('/history', (req, res) => {
-  res.json({ messages: [], history: 'placeholder' });
-});
-
 export default router;
+
