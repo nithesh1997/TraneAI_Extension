@@ -258,6 +258,14 @@ private _messages: { role: string, text: string, timestamp: number, attachments?
 		try {
 			const formData = new FormData();
 			formData.append('message', message);
+
+			const imageAttachments = attachments?.filter((a: any) => a.type === 'image' && a.imageData) ?? [];
+			for (const imageAttachment of imageAttachments) {
+				const imageBuffer = Buffer.from(imageAttachment.imageData, 'base64');
+				const blob = new Blob([imageBuffer], { type: imageAttachment.mimeType || 'image/jpeg' });
+				formData.append('images', blob, imageAttachment.name);
+			}
+
 			const response = await fetch('http://localhost:5000/api/chat/message', {
 				method: 'POST',
 				body: formData,

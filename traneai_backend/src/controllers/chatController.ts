@@ -6,18 +6,19 @@ import { generateExplanation, generateReview, generateTests } from '../services/
 
 export async function handleChatMessage(req: Request, res: Response): Promise<void> {
   try {
-    if (req.file) {
+    const uploadedFiles = Array.isArray(req.files) ? req.files as Express.Multer.File[] : [];
+    if (uploadedFiles.length > 0) {
       const userInput = req.body.message;
       if (!userInput) {
         res.status(400).json({ error: 'Message required with image' });
         return;
       }
-      const imagePath = req.file.path;
-      const imageBuffer = fs.readFileSync(imagePath);
-      const base64Image = imageBuffer.toString('base64');
-      const mimeType = req.file.mimetype || 'image/jpeg';
-      const reply = await generateVisionResponse(userInput, base64Image, mimeType);
-      fs.unlinkSync(imagePath);
+      const images = uploadedFiles.map(file => {
+        const imageBuffer = fs.readFileSync(file.path);
+        return { base64: imageBuffer.toString('base64'), mimeType: file.mimetype || 'image/jpeg' };
+      });
+      const reply = await generateVisionResponse(userInput, images);
+      for (const file of uploadedFiles) { fs.unlinkSync(file.path); }
       res.json({ message: reply });
       return;
     }

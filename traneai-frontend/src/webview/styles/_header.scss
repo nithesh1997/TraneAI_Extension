@@ -75,4 +75,16 @@
     background: var(--bg-tertiary);
     color: var(--text-primary);
   }
+
+  &--logout {
+    font-size: 11px;
+    font-weight: 500;
+    gap: 4px;
+    padding: 4px 7px;
+
+    &:hover {
+      background: rgba(248, 81, 73, 0.12);
+      color: var(--danger);
+    }
+  }
 }

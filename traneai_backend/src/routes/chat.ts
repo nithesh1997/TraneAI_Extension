@@ -44,7 +44,7 @@ const upload = multer({ dest: 'uploads/' });
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/message', upload.single('image'), handleChatMessage);
+router.post('/message', upload.array('images'), handleChatMessage);
 
 /**
  * @swagger

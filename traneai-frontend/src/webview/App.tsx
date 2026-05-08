@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppHeader } from './components/AppHeader';
 import { HeroSection } from './components/HeroSection';
 import { MessageList } from './components/MessageList';
@@ -6,12 +7,16 @@ import { InputArea } from './components/InputArea';
 import { TypingIndicator } from './components/TypingIndicator';
 import { RedirectScreen } from './components/RedirectScreen';
 import { ChatFooter } from './components/ChatFooter';
+import { LoginPage } from './components/LoginPage';
+import { SignupPage } from './components/SignupPage';
 import { MessageData, Attachment } from './components/Message';
 
 declare const vscode: any;
 declare const LOGO_URI: string;
 
-export const App: React.FC = () => {
+const ChatApp: React.FC = () => {
+	const { isAuthenticated } = useAuth();
+	const [authView, setAuthView] = useState<'login' | 'signup'>('login');
 	const [messages, setMessages] = useState<MessageData[]>([]);
 	const [isTyping, setIsTyping] = useState(false);
 	const [isFullScreen, setIsFullScreen] = useState(false);
@@ -68,6 +73,14 @@ export const App: React.FC = () => {
 	const isSidebar = document.body.classList.contains('sidebar');
 	const showRedirect = isFullScreen && isSidebar;
 
+	if (!isAuthenticated) {
+		return authView === 'login' ? (
+			<LoginPage logoUri={LOGO_URI} onSwitchToSignup={() => setAuthView('signup')} />
+		) : (
+			<SignupPage logoUri={LOGO_URI} onSwitchToLogin={() => setAuthView('login')} />
+		);
+	}
+
 	if (showRedirect) {
 		return <RedirectScreen logoUri={LOGO_URI} onRestore={handleRestore} />;
 	}
@@ -90,5 +103,13 @@ export const App: React.FC = () => {
 				<ChatFooter />
 			</div>
 		</div>
+	);
+};
+
+export const App: React.FC = () => {
+	return (
+		<AuthProvider>
+			<ChatApp />
+		</AuthProvider>
 	);
 };

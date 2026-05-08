@@ -25,8 +25,7 @@ export async function generateAIResponse(
 
 export async function generateVisionResponse(
   message: string,
-  base64Image: string,
-  mimeType: string
+  images: { base64: string; mimeType: string }[]
 ): Promise<string> {
 
   const client = new AzureOpenAI({
@@ -36,6 +35,11 @@ export async function generateVisionResponse(
     apiVersion: '2024-02-15-preview',
   });
 
+  const imageContent = images.map(img => ({
+    type: "image_url" as const,
+    image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
+  }));
+
   const response = await client.chat.completions.create({
     model: process.env.AZURE_OPENAI_DEPLOYMENT!,
     messages: [
@@ -43,12 +47,7 @@ export async function generateVisionResponse(
         role: "user",
         content: [
           { type: "text", text: message },
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:${mimeType};base64,${base64Image}`,
-            },
-          },
+          ...imageContent,
         ],
       },
     ],

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Tag } from 'antd';
 import { Attachment } from './Message';
 
 interface InputAreaProps {
@@ -10,7 +11,7 @@ interface InputAreaProps {
 }
 
 const MODELS = [
-	{ id: 'auto', name: 'Auto', icon: '⚡', canAttachFiles: false },
+	{ id: 'auto', name: 'Auto', icon: '⚡', canAttachFiles: true },
 	{ id: 'new-joiner', name: 'New Joiner', icon: '🧩', canAttachFiles: true },
 	{ id: 'developers', name: 'Developers', icon: '💻', canAttachFiles: true },
 	{ id: 'qa', name: 'QA', icon: '🧪', canAttachFiles: true },
@@ -92,14 +93,27 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const files = Array.from(e.target.files || []);
-		const newFiles: Attachment[] = files.map(f => ({
-			name: f.name,
-			path: f.name, // In a real app this would be the full path
-			type: 'file'
-		}));
-		const updatedFiles = [...attachedFiles, ...newFiles];
-		setAttachedFiles(updatedFiles);
-		onFilesSelected(updatedFiles.map(f => f.name));
+
+		const readFile = (f: File): Promise<Attachment> => new Promise((resolve) => {
+			if (f.type.startsWith('image/')) {
+				const reader = new FileReader();
+				reader.onload = (ev) => {
+					const dataUrl = ev.target?.result as string;
+					const base64 = dataUrl.split(',')[1];
+					resolve({ name: f.name, path: f.name, type: 'image', imageData: base64, mimeType: f.type });
+				};
+				reader.readAsDataURL(f);
+			} else {
+				resolve({ name: f.name, path: f.name, type: 'file' });
+			}
+		});
+
+		Promise.all(files.map(readFile)).then(newFiles => {
+			const updatedFiles = [...attachedFiles, ...newFiles];
+			setAttachedFiles(updatedFiles);
+			onFilesSelected(updatedFiles.map(f => f.name));
+		});
+
 		e.target.value = '';
 		setShowAttachmentDropdown(false);
 	};
@@ -149,8 +163,28 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 				{attachedFiles.length > 0 && (
 					<div className="attached-files">
 						{attachedFiles.map((file, index) => (
-							<div key={index} className={`file-chip ${file.type}`}>
-								{file.type === 'terminal' ? (
+							<Tag
+								key={index}
+								className={`file-chip ${file.type}`}
+								closable
+								onClose={() => removeFile(index)}
+								style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 6 }}
+							>
+								{file.type === 'image' && file.imageData ? (
+									<div className="img-thumb-wrap">
+										<img
+											className="chip-image-thumb"
+											src={`data:${file.mimeType || 'image/jpeg'};base64,${file.imageData}`}
+											alt={file.name}
+										/>
+										<div className="img-hover-preview">
+											<img
+												src={`data:${file.mimeType || 'image/jpeg'};base64,${file.imageData}`}
+												alt={file.name}
+											/>
+										</div>
+									</div>
+								) : file.type === 'terminal' ? (
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
 										<path d="M2 4h12v8H2V4z" stroke="currentColor" strokeWidth="1.2" />
 										<path d="M4 8h1M6 8h3" stroke="currentColor" strokeWidth="1.2" />
@@ -165,12 +199,7 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 									{file.name}
 									{file.type === 'terminal' && <div className="chip-tooltip">{file.path}</div>}
 								</span>
-								<button className="remove-file" onClick={() => removeFile(index)}>
-									<svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-										<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-									</svg>
-								</button>
-							</div>
+							</Tag>
 						))}
 					</div>
 				)}
@@ -220,7 +249,7 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 								)}
 							</div>
 						)}
-						<input type="file" ref={fileInputRef} id="file-input" style={{ display: 'none' }} multiple onChange={handleFileChange} />
+						<input type="file" ref={fileInputRef} id="file-input" style={{ display: 'none' }} multiple accept="image/*" onChange={handleFileChange} />
 
 						<div className={`skills-selector ${!hasSkills ? 'disabled' : ''}`}>
 							<button 
