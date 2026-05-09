@@ -7,7 +7,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	private _view?: vscode.WebviewView;
 	private _panel?: vscode.WebviewPanel;
 	private _isFullScreenActive = false;
-private _messages: { role: string, text: string, timestamp: number, attachments?: any[], id?: string, isStreaming?: boolean }[] = [];
+	private _messages: { role: string, text: string, timestamp: number, attachments?: any[], id?: string, isStreaming?: boolean }[] = [];
+	private _streamInterval?: ReturnType<typeof setInterval>;
+	private _abortController?: AbortController;
 
 	constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -65,14 +67,16 @@ private _messages: { role: string, text: string, timestamp: number, attachments?
 				}
 
 				this._broadcastTyping(true);
-				this._sendToBackend(data.text, data.attachments).then((aiReply: string) => {
+				this._abortController = new AbortController();
+				this._sendToBackend(data.text, data.attachments, this._abortController.signal).then((aiReply: string) => {
 					this._broadcastTyping(false);
 					const streamId = `ai-${Date.now()}`;
 					this._addMessage('ai', '', undefined, streamId, true);
 					let pos = 0;
-					const interval = setInterval(() => {
+					this._streamInterval = setInterval(() => {
 					  if (pos >= aiReply.length) {
-						clearInterval(interval);
+						clearInterval(this._streamInterval);
+						this._streamInterval = undefined;
 						const index = this._messages.findIndex((m: any) => m.id === streamId);
 						if (index !== -1) {
 						  this._messages[index].isStreaming = false;
@@ -80,22 +84,27 @@ private _messages: { role: string, text: string, timestamp: number, attachments?
 						}
 						return;
 					  }
-					  pos += 1;
+					  pos = Math.min(pos + 8, aiReply.length);
 					  const newText = aiReply.slice(0, pos);
 					  const index = this._messages.findIndex((m: any) => m.id === streamId);
 					  if (index !== -1) {
 						this._messages[index] = { ...this._messages[index]!, text: newText } as any;
 						this._syncMessages();
 					  }
-					}, 25);
+					}, 10);
 				}).catch((error: any) => {
 					this._broadcastTyping(false);
-					this._addMessage('ai', `Error: ${error.message}`);
+					if (error.name !== 'AbortError') {
+						this._addMessage('ai', `Error: ${error.message}`);
+					}
 				});
 
 				break;
 			case 'quickAction':
 				this._handleQuickAction(data.action, data.text);
+				break;
+			case 'stopGeneration':
+				this._stopGeneration();
 				break;
 			case 'clearChat':
 				this._messages = [];
@@ -254,7 +263,24 @@ private _messages: { role: string, text: string, timestamp: number, attachments?
 		return response;
 	}
 
-	private async _sendToBackend(message: string, attachments?: any[]): Promise<string> {
+	private _stopGeneration() {
+		if (this._streamInterval) {
+			clearInterval(this._streamInterval);
+			this._streamInterval = undefined;
+			const streamingIndex = this._messages.findLastIndex((m: any) => m.isStreaming);
+			if (streamingIndex !== -1) {
+				this._messages[streamingIndex].isStreaming = false;
+				this._syncMessages();
+			}
+		}
+		if (this._abortController) {
+			this._abortController.abort();
+			this._abortController = undefined;
+		}
+		this._broadcastTyping(false);
+	}
+
+	private async _sendToBackend(message: string, attachments?: any[], signal?: AbortSignal): Promise<string> {
 		try {
 			const formData = new FormData();
 			formData.append('message', message);
@@ -269,6 +295,7 @@ private _messages: { role: string, text: string, timestamp: number, attachments?
 			const response = await fetch('http://localhost:5000/api/chat/message', {
 				method: 'POST',
 				body: formData,
+				signal,
 			});
 
 			if (!response.ok) {

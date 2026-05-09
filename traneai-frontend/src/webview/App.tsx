@@ -62,6 +62,10 @@ const ChatApp: React.FC = () => {
 		vscode.postMessage({ command: 'clearChat' });
 	};
 
+	const handleStopGeneration = () => {
+		vscode.postMessage({ command: 'stopGeneration' });
+	};
+
 	const handleRestore = () => {
 		vscode.postMessage({ command: 'restore' });
 	};
@@ -99,6 +103,8 @@ const ChatApp: React.FC = () => {
 					onFilesSelected={handleFilesSelected}
 					currentModel={currentModel}
 					onModelChange={setCurrentModel}
+					isTyping={isTyping}
+					onStopGeneration={handleStopGeneration}
 				/>
 				<ChatFooter />
 			</div>

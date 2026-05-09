@@ -8,6 +8,8 @@ interface InputAreaProps {
 	currentModel: string;
 	onModelChange: (model: string) => void;
 	terminalPath?: string;
+	isTyping?: boolean;
+	onStopGeneration?: () => void;
 }
 
 const MODELS = [
@@ -48,7 +50,7 @@ const MODE_SKILLS: Record<string, string[]> = {
 	'automated-testing': ['playwright']
 };
 
-export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath }) => {
+export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration }) => {
 	const [text, setText] = useState('');
 	const [showModelDropdown, setShowModelDropdown] = useState(false);
 	const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
@@ -300,12 +302,21 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 					</div>
 
 					<div className="right-controls">
-						<button className="send-btn" id="send-btn" onClick={handleSend} disabled={!text.trim() && attachedFiles.length === 0}>
-							<svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-								<path d="M8 13V3M8 3L4 7M8 3l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-							</svg>
-							Send
-						</button>
+						{isTyping ? (
+							<button className="stop-btn" id="stop-btn" onClick={onStopGeneration} title="Stop generating">
+								<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+									<rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor" />
+								</svg>
+								Stop
+							</button>
+						) : (
+							<button className="send-btn" id="send-btn" onClick={handleSend} disabled={!text.trim() && attachedFiles.length === 0}>
+								<svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+									<path d="M8 13V3M8 3L4 7M8 3l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+								</svg>
+								Send
+							</button>
+						)}
 					</div>
 				</div>
 			</div>
