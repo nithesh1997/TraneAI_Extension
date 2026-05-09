@@ -494,6 +494,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 					content: m.text,
 				}));
 			formData.append('history', JSON.stringify(history));
+			
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			if (workspaceFolders && workspaceFolders.length > 0) {
+				formData.append('workspaceRoot', workspaceFolders[0].uri.fsPath);
+			}
 
 			const imageAttachments = attachments?.filter((a: any) => a.type === 'image' && a.imageData) ?? [];
 			for (const imageAttachment of imageAttachments) {

@@ -15,6 +15,7 @@ export interface ChatRequest {
   message: string;
   model?: string;
   history?: HistoryMessage[];
+  workspaceRoot?: string;
   context?: {
     fileName?: string;
     language?: string;
