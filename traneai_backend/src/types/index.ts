@@ -6,9 +6,15 @@ export interface Message {
   model?: string;
 }
 
+export interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface ChatRequest {
   message: string;
   model?: string;
+  history?: HistoryMessage[];
   context?: {
     fileName?: string;
     language?: string;

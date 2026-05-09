@@ -479,6 +479,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			const formData = new FormData();
 			formData.append('message', message);
 
+			const history = this._messages
+				.slice(0, -1)
+				.filter(m => !m.isStreaming && m.text)
+				.map(m => ({
+					role: m.role === 'ai' ? 'assistant' : 'user',
+					content: m.text,
+				}));
+			formData.append('history', JSON.stringify(history));
+
 			const imageAttachments = attachments?.filter((a: any) => a.type === 'image' && a.imageData) ?? [];
 			for (const imageAttachment of imageAttachments) {
 				const imageBuffer = Buffer.from(imageAttachment.imageData, 'base64');

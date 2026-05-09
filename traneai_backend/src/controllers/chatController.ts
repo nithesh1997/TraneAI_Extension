@@ -27,7 +27,13 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
       res.status(400).json({ error: 'Message is required' });
       return;
     }
-    const reply = await generateAIResponse(message, context);
+    let history: { role: 'user' | 'assistant'; content: string }[] | undefined;
+    if (req.body.history) {
+      try {
+        history = typeof req.body.history === 'string' ? JSON.parse(req.body.history) : req.body.history;
+      } catch {}
+    }
+    const reply = await generateAIResponse(message, history, context);
     res.json({ message: reply });
   } catch (error) {
     console.error('Chat error:', error);

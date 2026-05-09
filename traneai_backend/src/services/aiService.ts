@@ -2,6 +2,7 @@ import { AzureOpenAI } from 'openai';
 
 export async function generateAIResponse(
   message: string,
+  history?: { role: 'user' | 'assistant'; content: string }[],
   context?: any
 ): Promise<string> {
 
@@ -16,6 +17,7 @@ export async function generateAIResponse(
     model: process.env.AZURE_OPENAI_DEPLOYMENT!,
     messages: [
       { role: 'system', content: 'You are TraneAI assistant.' },
+      ...(history || []),
       { role: 'user', content: message }
     ],
   });
