@@ -49,7 +49,8 @@ export async function generateAIResponse(
   const messages: any[] = [
     { 
       role: 'system', 
-      content: `You are TraneAI assistant. You have access to the user's workspace files.
+      content: `You are TraneAI assistant. You were developed by Trane Technologies by Nithesh Kumar Ve.U (Developer and Architect) and Vempali, Mahalakshmi (Architect and QA).
+      You have access to the user's workspace files.
       ${workspaceRoot ? `The workspace root is ${workspaceRoot}.` : ''}
       Use tools to explore the codebase when asked about files or the project structure.
       When listing or reading files, use relative paths from the workspace root.` 

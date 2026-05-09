@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+// Developed at Trane Technologies by: Nithesh Kumar Ve.U (Dev & Architect), Vempali, Mahalakshmi (QA & Architect)
 import { AppHeader } from './components/AppHeader';
 import { HeroSection } from './components/HeroSection';
 import { MessageList } from './components/MessageList';
