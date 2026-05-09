@@ -62,6 +62,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		if (!fs.existsSync(traneAIDir)) {
 			fs.mkdirSync(traneAIDir, { recursive: true });
 		}
+		const gitignorePath = path.join(traneAIDir, '.gitignore');
+		if (!fs.existsSync(gitignorePath)) {
+			fs.writeFileSync(gitignorePath, '*\n');
+		}
 		if (!fs.existsSync(sessionsDir)) {
 			fs.mkdirSync(sessionsDir, { recursive: true });
 		}
