@@ -9,6 +9,7 @@ import { RedirectScreen } from './components/RedirectScreen';
 import { ChatFooter } from './components/ChatFooter';
 import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
+import { WorkspaceEmptyState } from './components/WorkspaceEmptyState';
 import { ChatHistory, SessionSummary } from './components/ChatHistory';
 import { MessageData, Attachment } from './components/Message';
 import { secureStore, secureRetrieve } from './utils/storage';
@@ -34,6 +35,7 @@ const ChatApp: React.FC = () => {
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
 	const [currentSessionId, setCurrentSessionId] = useState('');
+	const [workspaceOpen, setWorkspaceOpen] = useState(true);
 
 	useEffect(() => {
 		secureRetrieve<StoredTab>(TAB_STORAGE_KEY).then(stored => {
@@ -60,6 +62,9 @@ const ChatApp: React.FC = () => {
 			switch (message.type) {
 				case 'syncMessages':
 					setMessages(message.messages);
+					if (message.workspaceOpen !== undefined) {
+						setWorkspaceOpen(message.workspaceOpen);
+					}
 					break;
 				case 'typing':
 					setIsTyping(message.value);
@@ -70,6 +75,9 @@ const ChatApp: React.FC = () => {
 				case 'historyList':
 					setHistorySessions(message.sessions);
 					setCurrentSessionId(message.currentSessionId);
+					if (message.workspaceOpen !== undefined) {
+						setWorkspaceOpen(message.workspaceOpen);
+					}
 					break;
 			}
 		};
@@ -127,6 +135,14 @@ const ChatApp: React.FC = () => {
 		vscode.postMessage({ command: 'deleteSession', sessionId });
 	};
 
+	const handleOpenFolder = () => {
+		vscode.postMessage({ command: 'openFolder' });
+	};
+
+	const handleCloneRepository = () => {
+		vscode.postMessage({ command: 'cloneRepository' });
+	};
+
 	const isSidebar = document.body.classList.contains('sidebar');
 	const showRedirect = isFullScreen && isSidebar;
 
@@ -140,6 +156,16 @@ const ChatApp: React.FC = () => {
 
 	if (showRedirect) {
 		return <RedirectScreen logoUri={LOGO_URI} onRestore={handleRestore} />;
+	}
+
+	if (!workspaceOpen) {
+		return (
+			<WorkspaceEmptyState 
+				logoUri={LOGO_URI}
+				onOpenFolder={handleOpenFolder} 
+				onCloneRepository={handleCloneRepository} 
+			/>
+		);
 	}
 
 	return (

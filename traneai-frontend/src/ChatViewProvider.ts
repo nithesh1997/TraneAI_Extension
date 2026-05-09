@@ -161,7 +161,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 	private _broadcastHistoryList(): void {
 		const sessions = this._loadSessionList();
-		const msg = { type: 'historyList', sessions, currentSessionId: this._currentSessionId };
+		const workspaceOpen = !!vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0;
+		const msg = { type: 'historyList', sessions, currentSessionId: this._currentSessionId, workspaceOpen };
 		if (this._view) { this._view.webview.postMessage(msg); }
 		if (this._panel) { this._panel.webview.postMessage(msg); }
 		this._syncMessages();
@@ -313,6 +314,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				this._syncMessages();
 				this._broadcastHistoryList();
 				break;
+			case 'openFolder':
+				vscode.commands.executeCommand('vscode.openFolder');
+				break;
+			case 'cloneRepository':
+				vscode.commands.executeCommand('git.clone');
+				break;
 		}
 	}
 
@@ -328,7 +335,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _syncMessages() {
-		const message = { type: 'syncMessages', messages: this._messages };
+		const workspaceOpen = !!vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0;
+		const message = { type: 'syncMessages', messages: this._messages, workspaceOpen };
 		if (this._view) { this._view.webview.postMessage(message); }
 		if (this._panel) { this._panel.webview.postMessage(message); }
 	}
