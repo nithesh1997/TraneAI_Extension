@@ -138,6 +138,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		}
 		try {
 			const session: ChatSession = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+			if (this._userEmail && session.email && session.email !== this._userEmail) {
+				return;
+			}
 			this._currentSessionId = session.id;
 			this._messages = session.messages;
 			this._syncMessages();
@@ -161,6 +164,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		const msg = { type: 'historyList', sessions, currentSessionId: this._currentSessionId };
 		if (this._view) { this._view.webview.postMessage(msg); }
 		if (this._panel) { this._panel.webview.postMessage(msg); }
+		this._syncMessages();
 	}
 
 	public resolveWebviewView(
@@ -188,7 +192,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			this._broadcastHistoryList();
 		});
 
-		this._syncMessages();
+		this._broadcastHistoryList();
 	}
 
 	public setFullScreen(value: boolean) {
@@ -213,9 +217,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	private _handleMessage(data: any) {
 		switch (data.command) {
 			case 'login':
+				const prevEmail = this._userEmail;
 				this._userEmail = data.email || '';
 				this._ensureTraneAIDir();
-				this._createNewSession();
+				if (prevEmail && prevEmail !== this._userEmail) {
+					this._createNewSession();
+				}
 				this._broadcastHistoryList();
 				break;
 			case 'logout':

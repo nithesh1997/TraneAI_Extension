@@ -1,8 +1,16 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { secureStore, secureRetrieve, secureClear } from '../utils/storage';
+
+const AUTH_STORAGE_KEY = 'traneai_auth';
 
 interface AuthState {
 	isAuthenticated: boolean;
 	email: string | null;
+}
+
+interface StoredAuth {
+	email: string;
+	isAuthenticated: boolean;
 }
 
 interface AuthContextValue extends AuthState {
@@ -21,19 +29,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 		email: null,
 	});
 
+	useEffect(() => {
+		secureRetrieve<StoredAuth>(AUTH_STORAGE_KEY).then(stored => {
+			if (stored?.isAuthenticated && stored?.email) {
+				setAuthState({ isAuthenticated: true, email: stored.email });
+				vscode.postMessage({ command: 'login', email: stored.email });
+			}
+		});
+	}, []);
+
 	const login = useCallback((email: string, password: string) => {
 		vscode.postMessage({ command: 'login', email, password });
 		setAuthState({ isAuthenticated: true, email });
+		secureStore(AUTH_STORAGE_KEY, { email, isAuthenticated: true });
 	}, []);
 
 	const signup = useCallback((email: string, password: string) => {
 		vscode.postMessage({ command: 'signup', email, password });
 		setAuthState({ isAuthenticated: true, email });
+		secureStore(AUTH_STORAGE_KEY, { email, isAuthenticated: true });
 	}, []);
 
 	const logout = useCallback(() => {
 		vscode.postMessage({ command: 'logout' });
 		setAuthState({ isAuthenticated: false, email: null });
+		secureClear(AUTH_STORAGE_KEY);
 	}, []);
 
 	return (

@@ -11,6 +11,15 @@ import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
 import { ChatHistory, SessionSummary } from './components/ChatHistory';
 import { MessageData, Attachment } from './components/Message';
+import { secureStore, secureRetrieve } from './utils/storage';
+
+const TAB_STORAGE_KEY = 'traneai_tab';
+
+interface StoredTab {
+	currentModel: string;
+	authView: 'login' | 'signup';
+	currentSessionId?: string;
+}
 
 declare const vscode: any;
 declare const LOGO_URI: string;
@@ -25,6 +34,25 @@ const ChatApp: React.FC = () => {
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
 	const [currentSessionId, setCurrentSessionId] = useState('');
+
+	useEffect(() => {
+		secureRetrieve<StoredTab>(TAB_STORAGE_KEY).then(stored => {
+			if (stored?.currentModel) { setCurrentModel(stored.currentModel); }
+			if (stored?.authView) { setAuthView(stored.authView); }
+		});
+	}, []);
+
+	useEffect(() => {
+		if (isAuthenticated) {
+			secureRetrieve<StoredTab>(TAB_STORAGE_KEY).then(stored => {
+				if (stored?.currentSessionId) {
+					vscode.postMessage({ command: 'loadSession', sessionId: stored.currentSessionId });
+				}
+			});
+		} else {
+			setCurrentSessionId('');
+		}
+	}, [isAuthenticated]);
 
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent) => {
@@ -49,6 +77,10 @@ const ChatApp: React.FC = () => {
 		window.addEventListener('message', handleMessage);
 		return () => window.removeEventListener('message', handleMessage);
 	}, []);
+
+	useEffect(() => {
+		secureStore(TAB_STORAGE_KEY, { currentModel, authView, currentSessionId });
+	}, [currentModel, authView, currentSessionId]);
 
 	const handleSendMessage = (text: string, model: string, attachments: Attachment[]) => {
 		vscode.postMessage({ command: 'sendMessage', text, model, attachments });
