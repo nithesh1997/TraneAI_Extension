@@ -25,7 +25,7 @@ declare const vscode: any;
 declare const LOGO_URI: string;
 
 const ChatApp: React.FC = () => {
-	const { isAuthenticated } = useAuth();
+	const { isAuthenticated, email } = useAuth();
 	const [authView, setAuthView] = useState<'login' | 'signup'>('login');
 	const [messages, setMessages] = useState<MessageData[]>([]);
 	const [isTyping, setIsTyping] = useState(false);
@@ -152,7 +152,7 @@ const ChatApp: React.FC = () => {
 			/>
 			<div id="chat-container" className="chat-container">
 				<HeroSection logoUri={LOGO_URI} onQuickSend={handleQuickSend} visible={messages.length === 0} currentModel={currentModel} />
-				<MessageList messages={messages} logoUri={LOGO_URI} onCopy={handleCopy} />
+				<MessageList messages={messages} logoUri={LOGO_URI} onCopy={handleCopy} userEmail={email} />
 				<TypingIndicator logoUri={LOGO_URI} visible={isTyping} />
 			</div>
 			<div className="chat-input-section">

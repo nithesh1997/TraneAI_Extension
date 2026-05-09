@@ -21,11 +21,31 @@ interface MessageProps {
 	message: MessageData;
 	logoUri: string;
 	onCopy: (text: string) => void;
+	userEmail?: string | null;
 }
 
 const formatTime = (ts: number) => {
 	const d = new Date(ts);
 	return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+const getNameFromEmail = (email: string | null | undefined): string => {
+	if (!email) return 'User';
+	const local = email.split('@')[0];
+	const name = local.split(/[._-]/)[0];
+	return name.charAt(0).toUpperCase() + name.slice(1);
+};
+
+const getRelativeTime = (ts: number): string => {
+	const diffMs = Date.now() - ts;
+	const diffSec = Math.floor(diffMs / 1000);
+	if (diffSec < 60) return `${diffSec}s ago`;
+	const diffMin = Math.floor(diffSec / 60);
+	if (diffMin < 60) return `${diffMin}m ago`;
+	const diffHr = Math.floor(diffMin / 60);
+	if (diffHr < 24) return `${diffHr}h ago`;
+	const diffDay = Math.floor(diffHr / 24);
+	return `${diffDay}d ago`;
 };
 
 const applyInline = (text: string): string =>
@@ -96,10 +116,19 @@ const renderMarkdown = (text: string): string => {
 	return out.join('').replace(/\x00CB(\d+)\x00/g, (_m, i) => codeBlocks[+i]);
 };
 
-export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy }) => {
+export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, userEmail }) => {
 	const isUser = message.role === 'user';
 	const [copyText, setCopyText] = React.useState('Copy');
 	const [feedback, setFeedback] = React.useState<'up' | 'down' | null>(null);
+	const [relativeTime, setRelativeTime] = React.useState(() => getRelativeTime(message.timestamp));
+
+	React.useEffect(() => {
+		if (!isUser) return;
+		const interval = setInterval(() => {
+			setRelativeTime(getRelativeTime(message.timestamp));
+		}, 30000);
+		return () => clearInterval(interval);
+	}, [isUser, message.timestamp]);
 
 	const handleCopy = () => {
 		onCopy(message.text);
@@ -114,9 +143,9 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy }) =>
 			)}
 			<div className="msg-body">
 				<div className="msg-meta">
-					<span className="msg-author">{isUser ? 'Nithesh' : 'TraneAI'}</span>
+					<span className="msg-author">{isUser ? getNameFromEmail(userEmail) : 'TraneAI'}</span>
 					{isUser ? ',' : ''}
-					<span className="msg-time">{isUser ? '3m ago' : formatTime(message.timestamp)}</span>
+					<span className="msg-time">{isUser ? relativeTime : formatTime(message.timestamp)}</span>
 				</div>
 				<div className="msg-bubble">
 					{message.attachments && message.attachments.length > 0 && (
