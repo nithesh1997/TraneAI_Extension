@@ -1,17 +1,163 @@
 import * as vscode from 'vscode';
+import * as os from 'os';
+import * as fs from 'fs';
+import * as path from 'path';
 import { exec } from 'child_process';
 import { buildWebviewHtml } from './webview/WebviewTemplate';
+
+interface SessionMessage {
+	role: string;
+	text: string;
+	timestamp: number;
+	attachments?: any[];
+	id?: string;
+	isStreaming?: boolean;
+}
+
+interface ChatSession {
+	id: string;
+	title: string;
+	email: string;
+	createdAt: number;
+	updatedAt: number;
+	messages: SessionMessage[];
+}
+
+interface SessionSummary {
+	id: string;
+	title: string;
+	updatedAt: number;
+	messageCount: number;
+}
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'traneai.chatView';
 	private _view?: vscode.WebviewView;
 	private _panel?: vscode.WebviewPanel;
 	private _isFullScreenActive = false;
-	private _messages: { role: string, text: string, timestamp: number, attachments?: any[], id?: string, isStreaming?: boolean }[] = [];
+	private _messages: SessionMessage[] = [];
 	private _streamInterval?: ReturnType<typeof setInterval>;
 	private _abortController?: AbortController;
 
+	private _currentSessionId: string = '';
+	private _userEmail: string = '';
+
 	constructor(private readonly _extensionUri: vscode.Uri) {}
+
+	private _getTraneAIDir(): string {
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (workspaceFolders && workspaceFolders.length > 0) {
+			return path.join(workspaceFolders[0].uri.fsPath, '.traneAI');
+		}
+		return path.join(os.homedir(), '.traneAI');
+	}
+
+	private _getSessionsDir(): string {
+		return path.join(this._getTraneAIDir(), 'sessions');
+	}
+
+	private _ensureTraneAIDir(): void {
+		const traneAIDir = this._getTraneAIDir();
+		const sessionsDir = this._getSessionsDir();
+		if (!fs.existsSync(traneAIDir)) {
+			fs.mkdirSync(traneAIDir, { recursive: true });
+		}
+		if (!fs.existsSync(sessionsDir)) {
+			fs.mkdirSync(sessionsDir, { recursive: true });
+		}
+	}
+
+	private _createNewSession(): void {
+		this._currentSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+		this._messages = [];
+	}
+
+	private _saveCurrentSession(): void {
+		if (!this._currentSessionId || this._messages.length === 0) {
+			return;
+		}
+		this._ensureTraneAIDir();
+		const firstUserMsg = this._messages.find(m => m.role === 'user');
+		const title = firstUserMsg
+			? firstUserMsg.text.replace(/\s+/g, ' ').trim().slice(0, 50) + (firstUserMsg.text.length > 50 ? '…' : '')
+			: 'New Chat';
+
+		const sessionFile = path.join(this._getSessionsDir(), `${this._currentSessionId}.json`);
+		let createdAt = Date.now();
+		if (fs.existsSync(sessionFile)) {
+			try {
+				const existing: ChatSession = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+				createdAt = existing.createdAt;
+			} catch {}
+		}
+
+		const session: ChatSession = {
+			id: this._currentSessionId,
+			title,
+			email: this._userEmail,
+			createdAt,
+			updatedAt: Date.now(),
+			messages: this._messages.map(m => ({ ...m, isStreaming: false })),
+		};
+		fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2), 'utf-8');
+	}
+
+	private _loadSessionList(): SessionSummary[] {
+		this._ensureTraneAIDir();
+		const sessionsDir = this._getSessionsDir();
+		try {
+			const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
+			const summaries: SessionSummary[] = [];
+			for (const file of files) {
+				try {
+					const session: ChatSession = JSON.parse(fs.readFileSync(path.join(sessionsDir, file), 'utf-8'));
+					if (!this._userEmail || session.email === this._userEmail) {
+						summaries.push({
+							id: session.id,
+							title: session.title,
+							updatedAt: session.updatedAt,
+							messageCount: session.messages.length,
+						});
+					}
+				} catch {}
+			}
+			return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
+		} catch {
+			return [];
+		}
+	}
+
+	private _loadSessionById(sessionId: string): void {
+		const sessionFile = path.join(this._getSessionsDir(), `${sessionId}.json`);
+		if (!fs.existsSync(sessionFile)) {
+			return;
+		}
+		try {
+			const session: ChatSession = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+			this._currentSessionId = session.id;
+			this._messages = session.messages;
+			this._syncMessages();
+		} catch {}
+	}
+
+	private _deleteSession(sessionId: string): void {
+		const sessionFile = path.join(this._getSessionsDir(), `${sessionId}.json`);
+		if (fs.existsSync(sessionFile)) {
+			fs.unlinkSync(sessionFile);
+		}
+		if (this._currentSessionId === sessionId) {
+			this._createNewSession();
+			this._syncMessages();
+		}
+		this._broadcastHistoryList();
+	}
+
+	private _broadcastHistoryList(): void {
+		const sessions = this._loadSessionList();
+		const msg = { type: 'historyList', sessions, currentSessionId: this._currentSessionId };
+		if (this._view) { this._view.webview.postMessage(msg); }
+		if (this._panel) { this._panel.webview.postMessage(msg); }
+	}
 
 	public resolveWebviewView(
 		webviewView: vscode.WebviewView,
@@ -29,6 +175,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 		webviewView.webview.onDidReceiveMessage(data => {
 			this._handleMessage(data);
+		});
+
+		vscode.workspace.onDidChangeWorkspaceFolders(() => {
+			this._saveCurrentSession();
+			this._createNewSession();
+			this._syncMessages();
+			this._broadcastHistoryList();
 		});
 
 		this._syncMessages();
@@ -55,10 +208,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 	private _handleMessage(data: any) {
 		switch (data.command) {
+			case 'login':
+				this._userEmail = data.email || '';
+				this._ensureTraneAIDir();
+				this._createNewSession();
+				this._broadcastHistoryList();
+				break;
+			case 'logout':
+				this._saveCurrentSession();
+				this._userEmail = '';
+				this._createNewSession();
+				this._syncMessages();
+				break;
 			case 'restore':
 				vscode.commands.executeCommand('trane-ai.restoreToSidebar');
 				break;
 			case 'sendMessage':
+				if (!this._currentSessionId) {
+					this._createNewSession();
+				}
 				this._addMessage('user', data.text, data.attachments);
 
 				if (data.text.includes('@comprehensive-review')) {
@@ -81,6 +249,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 						if (index !== -1) {
 						  this._messages[index].isStreaming = false;
 						  this._syncMessages();
+						  this._saveCurrentSession();
+						  this._broadcastHistoryList();
 						}
 						return;
 					  }
@@ -96,6 +266,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 					this._broadcastTyping(false);
 					if (error.name !== 'AbortError') {
 						this._addMessage('ai', `Error: ${error.message}`);
+						this._saveCurrentSession();
 					}
 				});
 
@@ -107,13 +278,29 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				this._stopGeneration();
 				break;
 			case 'clearChat':
-				this._messages = [];
-				this._syncMessages();
+				this._deleteSession(this._currentSessionId);
 				break;
 			case 'copyMessage':
 				vscode.env.clipboard.writeText(data.text);
 				break;
 			case 'filesSelected':
+				break;
+			case 'loadHistory':
+				this._broadcastHistoryList();
+				break;
+			case 'loadSession':
+				this._saveCurrentSession();
+				this._loadSessionById(data.sessionId);
+				this._broadcastHistoryList();
+				break;
+			case 'deleteSession':
+				this._deleteSession(data.sessionId);
+				break;
+			case 'newChat':
+				this._saveCurrentSession();
+				this._createNewSession();
+				this._syncMessages();
+				this._broadcastHistoryList();
 				break;
 		}
 	}
@@ -267,7 +454,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		if (this._streamInterval) {
 			clearInterval(this._streamInterval);
 			this._streamInterval = undefined;
-			const streamingIndex = this._messages.findLastIndex((m: any) => m.isStreaming);
+			let streamingIndex = -1;
+			for (let i = this._messages.length - 1; i >= 0; i--) {
+				if (this._messages[i].isStreaming) { streamingIndex = i; break; }
+			}
 			if (streamingIndex !== -1) {
 				this._messages[streamingIndex].isStreaming = false;
 				this._syncMessages();

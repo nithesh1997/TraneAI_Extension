@@ -9,6 +9,7 @@ import { RedirectScreen } from './components/RedirectScreen';
 import { ChatFooter } from './components/ChatFooter';
 import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
+import { ChatHistory, SessionSummary } from './components/ChatHistory';
 import { MessageData, Attachment } from './components/Message';
 
 declare const vscode: any;
@@ -21,6 +22,9 @@ const ChatApp: React.FC = () => {
 	const [isTyping, setIsTyping] = useState(false);
 	const [isFullScreen, setIsFullScreen] = useState(false);
 	const [currentModel, setCurrentModel] = useState('auto');
+	const [historyOpen, setHistoryOpen] = useState(false);
+	const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
+	const [currentSessionId, setCurrentSessionId] = useState('');
 
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent) => {
@@ -34,6 +38,10 @@ const ChatApp: React.FC = () => {
 					break;
 				case 'setFullScreen':
 					setIsFullScreen(message.value);
+					break;
+				case 'historyList':
+					setHistorySessions(message.sessions);
+					setCurrentSessionId(message.currentSessionId);
 					break;
 			}
 		};
@@ -55,7 +63,7 @@ const ChatApp: React.FC = () => {
 	};
 
 	const handleNewChat = () => {
-		vscode.postMessage({ command: 'clearChat' });
+		vscode.postMessage({ command: 'newChat' });
 	};
 
 	const handleClearChat = () => {
@@ -72,6 +80,19 @@ const ChatApp: React.FC = () => {
 
 	const handleCopy = (text: string) => {
 		vscode.postMessage({ command: 'copyMessage', text });
+	};
+
+	const handleShowHistory = () => {
+		vscode.postMessage({ command: 'loadHistory' });
+		setHistoryOpen(true);
+	};
+
+	const handleLoadSession = (sessionId: string) => {
+		vscode.postMessage({ command: 'loadSession', sessionId });
+	};
+
+	const handleDeleteSession = (sessionId: string) => {
+		vscode.postMessage({ command: 'deleteSession', sessionId });
 	};
 
 	const isSidebar = document.body.classList.contains('sidebar');
@@ -91,7 +112,12 @@ const ChatApp: React.FC = () => {
 
 	return (
 		<div className="main-content">
-			<AppHeader logoUri={LOGO_URI} onNewChat={handleNewChat} onClearChat={handleClearChat} />
+			<AppHeader
+				logoUri={LOGO_URI}
+				onNewChat={handleNewChat}
+				onClearChat={handleClearChat}
+				onShowHistory={handleShowHistory}
+			/>
 			<div id="chat-container" className="chat-container">
 				<HeroSection logoUri={LOGO_URI} onQuickSend={handleQuickSend} visible={messages.length === 0} currentModel={currentModel} />
 				<MessageList messages={messages} logoUri={LOGO_URI} onCopy={handleCopy} />
@@ -108,6 +134,15 @@ const ChatApp: React.FC = () => {
 				/>
 				<ChatFooter />
 			</div>
+			<ChatHistory
+				sessions={historySessions}
+				currentSessionId={currentSessionId}
+				visible={historyOpen}
+				onClose={() => setHistoryOpen(false)}
+				onLoadSession={handleLoadSession}
+				onDeleteSession={handleDeleteSession}
+				onNewChat={handleNewChat}
+			/>
 		</div>
 	);
 };
