@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { secureStore, secureRetrieve, secureClear } from '../utils/storage';
 
 const AUTH_STORAGE_KEY = 'traneai_auth';
@@ -56,8 +56,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 		secureClear(AUTH_STORAGE_KEY);
 	}, []);
 
+	const value = useMemo(() => ({ ...authState, login, signup, logout }), [authState, login, signup, logout]);
+
 	return (
-		<AuthContext.Provider value={{ ...authState, login, signup, logout }}>
+		<AuthContext.Provider value={value}>
 			{children}
 		</AuthContext.Provider>
 	);

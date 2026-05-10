@@ -291,6 +291,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			localResourceRoots: [this._extensionUri]
 		};
 
+		// @ts-ignore
+		webviewView.retainContextWhenHidden = true;
+
 		webviewView.webview.html = this._getHtmlForWebview(webviewView.webview, false, this._isFullScreenActive);
 
 		webviewView.webview.onDidReceiveMessage(data => {
@@ -459,7 +462,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			vscode.ViewColumn.One,
 			{
 				enableScripts: true,
-				localResourceRoots: [this._extensionUri]
+				localResourceRoots: [this._extensionUri],
+				retainContextWhenHidden: true
 			}
 		);
 

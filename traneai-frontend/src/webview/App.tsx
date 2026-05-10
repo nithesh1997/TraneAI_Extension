@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 // Developed at Trane Technologies by: Nithesh Kumar Ve.U (Dev & Architect), Vempali, Mahalakshmi (QA & Architect)
 import { AppHeader } from './components/AppHeader';
@@ -37,19 +37,27 @@ const ChatApp: React.FC = () => {
 	const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
 	const [currentSessionId, setCurrentSessionId] = useState('');
 	const [workspaceOpen, setWorkspaceOpen] = useState(true);
+	const [isLoading, setIsLoading] = useState(true);
 
 	useEffect(() => {
 		secureRetrieve<StoredTab>(TAB_STORAGE_KEY).then(stored => {
 			if (stored?.currentModel) { setCurrentModel(stored.currentModel); }
 			if (stored?.authView) { setAuthView(stored.authView); }
+		}).finally(() => {
+			if (!isAuthenticated) {
+				setIsLoading(false);
+			}
 		});
-	}, []);
+	}, [isAuthenticated]);
 
 	useEffect(() => {
 		if (isAuthenticated) {
+			setIsLoading(true);
 			secureRetrieve<StoredTab>(TAB_STORAGE_KEY).then(stored => {
 				if (stored?.currentSessionId) {
 					vscode.postMessage({ command: 'loadSession', sessionId: stored.currentSessionId });
+				} else {
+					setIsLoading(false);
 				}
 			});
 		} else {
@@ -66,6 +74,7 @@ const ChatApp: React.FC = () => {
 					if (message.workspaceOpen !== undefined) {
 						setWorkspaceOpen(message.workspaceOpen);
 					}
+					setIsLoading(false);
 					break;
 				case 'typing':
 					setIsTyping(message.value);
@@ -91,61 +100,71 @@ const ChatApp: React.FC = () => {
 		secureStore(TAB_STORAGE_KEY, { currentModel, authView, currentSessionId });
 	}, [currentModel, authView, currentSessionId]);
 
-	const handleSendMessage = (text: string, model: string, attachments: Attachment[]) => {
+	const handleSendMessage = useCallback((text: string, model: string, attachments: Attachment[]) => {
 		vscode.postMessage({ command: 'sendMessage', text, model, attachments });
-	};
+	}, []);
 
-	const handleFilesSelected = (files: string[]) => {
+	const handleFilesSelected = useCallback((files: string[]) => {
 		vscode.postMessage({ command: 'filesSelected', files });
-	};
+	}, []);
 
-	const handleQuickSend = (action: string, text: string) => {
+	const handleQuickSend = useCallback((action: string, text: string) => {
 		vscode.postMessage({ command: 'quickAction', action, text });
-	};
+	}, []);
 
-	const handleNewChat = () => {
+	const handleNewChat = useCallback(() => {
 		vscode.postMessage({ command: 'newChat' });
-	};
+	}, []);
 
-	const handleClearChat = () => {
+	const handleClearChat = useCallback(() => {
 		vscode.postMessage({ command: 'clearChat' });
-	};
+	}, []);
 
-	const handleStopGeneration = () => {
+	const handleStopGeneration = useCallback(() => {
 		vscode.postMessage({ command: 'stopGeneration' });
-	};
+	}, []);
 
-	const handleRestore = () => {
+	const handleRestore = useCallback(() => {
 		vscode.postMessage({ command: 'restore' });
-	};
+	}, []);
 
-	const handleCopy = (text: string) => {
+	const handleCopy = useCallback((text: string) => {
 		vscode.postMessage({ command: 'copyMessage', text });
-	};
+	}, []);
 
-	const handleShowHistory = () => {
+	const handleShowHistory = useCallback(() => {
 		vscode.postMessage({ command: 'loadHistory' });
 		setHistoryOpen(true);
-	};
+	}, []);
 
-	const handleLoadSession = (sessionId: string) => {
+	const handleLoadSession = useCallback((sessionId: string) => {
+		setIsLoading(true);
 		vscode.postMessage({ command: 'loadSession', sessionId });
-	};
+	}, []);
 
-	const handleDeleteSession = (sessionId: string) => {
+	const handleDeleteSession = useCallback((sessionId: string) => {
 		vscode.postMessage({ command: 'deleteSession', sessionId });
-	};
+	}, []);
 
-	const handleOpenFolder = () => {
+	const handleOpenFolder = useCallback(() => {
 		vscode.postMessage({ command: 'openFolder' });
-	};
+	}, []);
 
-	const handleCloneRepository = () => {
+	const handleCloneRepository = useCallback(() => {
 		vscode.postMessage({ command: 'cloneRepository' });
-	};
+	}, []);
 
 	const isSidebar = document.body.classList.contains('sidebar');
 	const showRedirect = isFullScreen && isSidebar;
+
+	if (isLoading) {
+		return (
+			<div className="loading-screen" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '16px' }}>
+				<img src={LOGO_URI} alt="TraneAI" style={{ width: '48px', height: '48px', animation: 'pulse 2s infinite' }} />
+				<div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Loading your session...</div>
+			</div>
+		);
+	}
 
 	if (!isAuthenticated) {
 		return authView === 'login' ? (

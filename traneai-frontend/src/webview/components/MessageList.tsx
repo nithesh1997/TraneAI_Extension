@@ -8,7 +8,7 @@ interface MessageListProps {
 	userEmail?: string | null;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({ messages, logoUri, onCopy, userEmail }) => {
+export const MessageList: React.FC<MessageListProps> = React.memo(({ messages, logoUri, onCopy, userEmail }) => {
 	const listRef = React.useRef<HTMLDivElement>(null);
 
 	React.useEffect(() => {

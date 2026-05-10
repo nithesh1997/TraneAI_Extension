@@ -95,15 +95,32 @@ const CONTEXT_OPTIONS = [
 	},
 ];
 
-export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration }) => {
-	const [text, setText] = useState('');
+declare const vscode: any;
+
+export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration }) => {
+	const [text, setText] = useState(() => {
+		const state = vscode.getState();
+		return state?.inputText || '';
+	});
 	const [showModelDropdown, setShowModelDropdown] = useState(false);
 	const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
 	const [showAttachmentDropdown, setShowAttachmentDropdown] = useState(false);
 	const [showContextDropdown, setShowContextDropdown] = useState(false);
-	const [attachedFiles, setAttachedFiles] = useState<Attachment[]>([]);
+	const [attachedFiles, setAttachedFiles] = useState<Attachment[]>(() => {
+		const state = vscode.getState();
+		return state?.attachedFiles || [];
+	});
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+
+	// Persist input text and files
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			const state = vscode.getState() || {};
+			vscode.setState({ ...state, inputText: text, attachedFiles: attachedFiles });
+		}, 500);
+		return () => clearTimeout(timer);
+	}, [text, attachedFiles]);
 
 	const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 		const el = e.target;
@@ -147,6 +164,10 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, onFilesSele
 
 		onSendMessage(finalChatText, currentModel, attachedFiles);
 		setText('');
+		// Clear persisted state immediately on send
+		const state = vscode.getState() || {};
+		vscode.setState({ ...state, inputText: '', attachedFiles: [] });
+		
 		setAttachedFiles([]);
 		if (textareaRef.current) {
 			textareaRef.current.style.height = 'auto';
