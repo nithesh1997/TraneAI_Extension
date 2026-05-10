@@ -1,6 +1,7 @@
 import { AzureOpenAI } from 'openai';
 import fs from 'fs';
 import path from 'path';
+import { handleZenflowMessage } from './zenflowService';
 
 const MODE_DUMMY_RESPONSES: Record<string, string> = {
   'new-joiner': "👋 **New Joiner Mode** is coming soon! This mode will help new team members get onboarded quickly. Stay tuned!",
@@ -17,6 +18,11 @@ export async function generateAIResponse(
   workspaceRoot?: string,
   mode?: string
 ): Promise<string> {
+
+  if (mode === 'zenflow') {
+    const result = await handleZenflowMessage({ message, history, context, workspaceRoot });
+    return result.content;
+  }
 
   if (mode && mode !== 'auto' && MODE_DUMMY_RESPONSES[mode]) {
     return MODE_DUMMY_RESPONSES[mode];

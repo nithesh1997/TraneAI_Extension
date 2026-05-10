@@ -14,6 +14,7 @@ interface InputAreaProps {
 
 const MODELS = [
 	{ id: 'auto', name: 'Auto', icon: '⚡', canAttachFiles: true },
+	{ id: 'zenflow', name: 'Zenflow', icon: '🌊', canAttachFiles: true },
 	{ id: 'new-joiner', name: 'New Joiner', icon: '🧩', canAttachFiles: true },
 	{ id: 'developers', name: 'Developers', icon: '💻', canAttachFiles: true },
 	{ id: 'qa', name: 'QA', icon: '🧪', canAttachFiles: true },
