@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as zlib from 'zlib';
+import * as crypto from 'crypto';
 import { exec } from 'child_process';
 import { buildWebviewHtml } from './webview/WebviewTemplate';
 
@@ -69,6 +71,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		if (!fs.existsSync(sessionsDir)) {
 			fs.mkdirSync(sessionsDir, { recursive: true });
 		}
+		this._migrateSessions();
+	}
+
+	private _migrateSessions(): void {
+		const sessionsDir = this._getSessionsDir();
+		if (!fs.existsSync(sessionsDir)) return;
+		
+		try {
+			const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
+			for (const file of files) {
+				const jsonPath = path.join(sessionsDir, file);
+				const tranePath = path.join(sessionsDir, file.replace('.json', '.trane'));
+				
+				try {
+					if (!fs.existsSync(tranePath)) {
+						const content = fs.readFileSync(jsonPath, 'utf-8');
+						const encrypted = this._compressAndEncrypt(content);
+						fs.writeFileSync(tranePath, encrypted);
+					}
+					fs.unlinkSync(jsonPath);
+				} catch (e) {
+					console.error(`Failed to migrate ${file}:`, e);
+				}
+			}
+		} catch (e) {
+			console.error('Failed to read sessions directory for migration:', e);
+		}
 	}
 
 	private _createNewSession(): void {
@@ -86,11 +115,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			? firstUserMsg.text.replace(/\s+/g, ' ').trim().slice(0, 50) + (firstUserMsg.text.length > 50 ? '…' : '')
 			: 'New Chat';
 
-		const sessionFile = path.join(this._getSessionsDir(), `${this._currentSessionId}.json`);
+		const sessionsDir = this._getSessionsDir();
+		const sessionFile = path.join(sessionsDir, `${this._currentSessionId}.trane`);
+		const oldSessionFile = path.join(sessionsDir, `${this._currentSessionId}.json`);
+		
 		let createdAt = Date.now();
 		if (fs.existsSync(sessionFile)) {
 			try {
-				const existing: ChatSession = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+				const content = this._decryptAndDecompress(fs.readFileSync(sessionFile));
+				const existing: ChatSession = JSON.parse(content);
+				createdAt = existing.createdAt;
+			} catch {}
+		} else if (fs.existsSync(oldSessionFile)) {
+			try {
+				const existing: ChatSession = JSON.parse(fs.readFileSync(oldSessionFile, 'utf-8'));
 				createdAt = existing.createdAt;
 			} catch {}
 		}
@@ -103,60 +141,133 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			updatedAt: Date.now(),
 			messages: this._messages.map(m => ({ ...m, isStreaming: false })),
 		};
-		fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2), 'utf-8');
+		
+		try {
+			const data = JSON.stringify(session);
+			const encrypted = this._compressAndEncrypt(data);
+			fs.writeFileSync(sessionFile, encrypted);
+			
+			// If we successfully saved the new format, remove the old one
+			if (fs.existsSync(oldSessionFile)) {
+				fs.unlinkSync(oldSessionFile);
+			}
+		} catch (e) {
+			console.error('Failed to save session:', e);
+		}
 	}
 
 	private _loadSessionList(): SessionSummary[] {
 		this._ensureTraneAIDir();
 		const sessionsDir = this._getSessionsDir();
 		try {
-			const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
-			const summaries: SessionSummary[] = [];
+			const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json') || f.endsWith('.trane'));
+			const summariesMap: Map<string, SessionSummary> = new Map();
+			
 			for (const file of files) {
 				try {
-					const session: ChatSession = JSON.parse(fs.readFileSync(path.join(sessionsDir, file), 'utf-8'));
+					const filePath = path.join(sessionsDir, file);
+					let session: ChatSession;
+					
+					if (file.endsWith('.trane')) {
+						const content = this._decryptAndDecompress(fs.readFileSync(filePath));
+						if (!content) continue;
+						session = JSON.parse(content);
+					} else {
+						session = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+					}
+
 					if (!this._userEmail || session.email === this._userEmail) {
-						summaries.push({
-							id: session.id,
-							title: session.title,
-							updatedAt: session.updatedAt,
-							messageCount: session.messages.length,
-						});
+						if (!summariesMap.has(session.id) || summariesMap.get(session.id)!.updatedAt < session.updatedAt) {
+							summariesMap.set(session.id, {
+								id: session.id,
+								title: session.title,
+								updatedAt: session.updatedAt,
+								messageCount: session.messages.length,
+							});
+						}
 					}
 				} catch {}
 			}
-			return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
+			return Array.from(summariesMap.values()).sort((a, b) => b.updatedAt - a.updatedAt);
 		} catch {
 			return [];
 		}
 	}
 
 	private _loadSessionById(sessionId: string): void {
-		const sessionFile = path.join(this._getSessionsDir(), `${sessionId}.json`);
-		if (!fs.existsSync(sessionFile)) {
+		const sessionsDir = this._getSessionsDir();
+		const sessionFile = path.join(sessionsDir, `${sessionId}.trane`);
+		const oldSessionFile = path.join(sessionsDir, `${sessionId}.json`);
+		
+		let session: ChatSession | undefined;
+		
+		if (fs.existsSync(sessionFile)) {
+			try {
+				const content = this._decryptAndDecompress(fs.readFileSync(sessionFile));
+				if (content) {
+					session = JSON.parse(content);
+				}
+			} catch {}
+		} else if (fs.existsSync(oldSessionFile)) {
+			try {
+				session = JSON.parse(fs.readFileSync(oldSessionFile, 'utf-8'));
+			} catch {}
+		}
+
+		if (!session) {
 			return;
 		}
-		try {
-			const session: ChatSession = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
-			if (this._userEmail && session.email && session.email !== this._userEmail) {
-				return;
-			}
-			this._currentSessionId = session.id;
-			this._messages = session.messages;
-			this._syncMessages();
-		} catch {}
+
+		if (this._userEmail && session.email && session.email !== this._userEmail) {
+			return;
+		}
+		this._currentSessionId = session.id;
+		this._messages = session.messages;
+		this._syncMessages();
 	}
 
 	private _deleteSession(sessionId: string): void {
 		const sessionFile = path.join(this._getSessionsDir(), `${sessionId}.json`);
+		const compressedFile = path.join(this._getSessionsDir(), `${sessionId}.trane`);
+		
 		if (fs.existsSync(sessionFile)) {
 			fs.unlinkSync(sessionFile);
 		}
+		if (fs.existsSync(compressedFile)) {
+			fs.unlinkSync(compressedFile);
+		}
+		
 		if (this._currentSessionId === sessionId) {
 			this._createNewSession();
 			this._syncMessages();
 		}
 		this._broadcastHistoryList();
+	}
+
+	private _getEncryptionKey(): Buffer {
+		const secret = vscode.env.machineId || 'traneai-default-secret';
+		return crypto.scryptSync(secret, 'traneai-salt', 32);
+	}
+
+	private _compressAndEncrypt(data: string): Buffer {
+		const compressed = zlib.deflateSync(data);
+		const iv = crypto.randomBytes(16);
+		const cipher = crypto.createCipheriv('aes-256-cbc', this._getEncryptionKey(), iv);
+		const encrypted = Buffer.concat([cipher.update(compressed), cipher.final()]);
+		return Buffer.concat([iv, encrypted]);
+	}
+
+	private _decryptAndDecompress(buffer: Buffer): string {
+		try {
+			const iv = buffer.subarray(0, 16);
+			const encryptedData = buffer.subarray(16);
+			const decipher = crypto.createDecipheriv('aes-256-cbc', this._getEncryptionKey(), iv);
+			const decrypted = Buffer.concat([decipher.update(encryptedData), decipher.final()]);
+			return zlib.inflateSync(decrypted).toString('utf-8');
+		} catch (e) {
+			console.error('Failed to decrypt/decompress session:', e);
+			return '';
+		}
 	}
 
 	private _broadcastHistoryList(): void {
