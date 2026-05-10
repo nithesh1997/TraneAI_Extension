@@ -426,4 +426,4 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			</div>
 		</div>
 	);
-};
+});
