@@ -248,7 +248,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 				this._broadcastTyping(true);
 				this._abortController = new AbortController();
-				this._sendToBackend(data.text, data.attachments, this._abortController.signal).then((aiReply: string) => {
+				this._sendToBackend(data.text, data.model, data.attachments, this._abortController.signal).then((aiReply: string) => {
 					this._broadcastTyping(false);
 					const streamId = `ai-${Date.now()}`;
 					this._addMessage('ai', '', undefined, streamId, true);
@@ -489,10 +489,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		this._broadcastTyping(false);
 	}
 
-	private async _sendToBackend(message: string, attachments?: any[], signal?: AbortSignal): Promise<string> {
+	private async _sendToBackend(message: string, model?: string, attachments?: any[], signal?: AbortSignal): Promise<string> {
 		try {
 			const formData = new FormData();
 			formData.append('message', message);
+			if (model) {
+				formData.append('model', model);
+			}
 
 			const history = this._messages
 				.slice(0, -1)

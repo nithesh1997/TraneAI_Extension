@@ -2,12 +2,25 @@ import { AzureOpenAI } from 'openai';
 import fs from 'fs';
 import path from 'path';
 
+const MODE_DUMMY_RESPONSES: Record<string, string> = {
+  'new-joiner': "👋 **New Joiner Mode** is coming soon! This mode will help new team members get onboarded quickly. Stay tuned!",
+  'developers': "💻 **Developers Mode** is coming soon! This mode will provide advanced code analysis and developer tools. Stay tuned!",
+  'qa': "🧪 **QA Mode** is coming soon! This mode will assist with quality assurance workflows and test planning. Stay tuned!",
+  'eva': "🤖 **EVA Mode** is coming soon! This mode will provide specialized AI assistance. Stay tuned!",
+  'automated-testing': "🔄 **Automated Testing Mode** is coming soon! This mode will help you create and manage automated test suites. Stay tuned!",
+};
+
 export async function generateAIResponse(
   message: string,
   history?: { role: 'user' | 'assistant'; content: string }[],
   context?: any,
-  workspaceRoot?: string
+  workspaceRoot?: string,
+  mode?: string
 ): Promise<string> {
+
+  if (mode && mode !== 'auto' && MODE_DUMMY_RESPONSES[mode]) {
+    return MODE_DUMMY_RESPONSES[mode];
+  }
 
   const client = new AzureOpenAI({
     apiKey: process.env.AZURE_OPENAI_API_KEY,

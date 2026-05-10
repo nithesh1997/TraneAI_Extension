@@ -22,7 +22,7 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
       res.json({ message: reply });
       return;
     }
-    const { message, context, workspaceRoot } = req.body as ChatRequest;
+    const { message, model, context, workspaceRoot } = req.body as ChatRequest;
     if (!message || typeof message !== 'string') {
       res.status(400).json({ error: 'Message is required' });
       return;
@@ -33,7 +33,7 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
         history = typeof req.body.history === 'string' ? JSON.parse(req.body.history) : req.body.history;
       } catch {}
     }
-    const reply = await generateAIResponse(message, history, context, workspaceRoot);
+    const reply = await generateAIResponse(message, history, context, workspaceRoot, model);
     res.json({ message: reply });
   } catch (error) {
     console.error('Chat error:', error);
