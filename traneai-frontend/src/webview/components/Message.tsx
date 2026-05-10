@@ -1,5 +1,91 @@
 import React from 'react';
 
+type MessagePart =
+  | { type: 'markdown'; content: string }
+  | { type: 'command'; cmd: string; status: string; output: string };
+
+const parseMessageParts = (text: string): MessagePart[] => {
+  const parts: MessagePart[] = [];
+  const regex = /```cmd-result\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'markdown', content: text.slice(lastIndex, match.index) });
+    }
+    try {
+      const data = JSON.parse(match[1].trim());
+      parts.push({ type: 'command', cmd: data.cmd, status: data.status, output: data.output });
+    } catch {
+      parts.push({ type: 'markdown', content: match[0] });
+    }
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ type: 'markdown', content: text.slice(lastIndex) });
+  }
+
+  return parts;
+};
+
+const CommandBlock: React.FC<{ cmd: string; status: string; output: string; onCopy: (text: string) => void }> = ({ cmd, status, output, onCopy }) => {
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopy = () => {
+    onCopy(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="cmd-block">
+      <div className="cmd-block-header">
+        <span className="cmd-terminal-icon">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.2" />
+            <path d="M4.5 6l2 2-2 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M8.5 10h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+          </svg>
+        </span>
+        <span className="cmd-text">{cmd}</span>
+        <button className="cmd-copy-btn" onClick={handleCopy} title="Copy command">
+          {copied ? (
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+              <path d="M2 8l4 4 8-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+              <rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M3 11V3h8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </button>
+      </div>
+      <div className={`cmd-status ${status === 'success' ? 'cmd-status-success' : 'cmd-status-error'}`}>
+        <span className="cmd-status-dot"></span>
+        <span>Command executed</span>
+        {output && output !== '(no output)' && (
+          <details className="cmd-output-details">
+            <summary className="cmd-output-toggle">
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none">
+                <rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor" opacity="0.6" />
+              </svg>
+            </summary>
+            <pre className="cmd-output">{output}</pre>
+          </details>
+        )}
+        {(!output || output === '(no output)') && (
+          <svg className="cmd-status-icon" width="9" height="9" viewBox="0 0 16 16" fill="none">
+            <rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor" opacity="0.6" />
+          </svg>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export type Attachment = {
   name: string;
   path?: string;
@@ -174,7 +260,37 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 							))}
 						</div>
 					)}
-					<div className={`msg-text ${message.role === 'assistant' && message.isStreaming ? 'streaming' : ''}`} dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) + (message.role === 'assistant' && message.isStreaming ? '<span class="cursor">|</span>' : '') }}></div>
+					{(() => {
+						const parts = parseMessageParts(message.text);
+						const hasCmdBlocks = parts.some(p => p.type === 'command');
+						const isStreaming = message.role === 'assistant' && message.isStreaming;
+						if (!hasCmdBlocks) {
+							return (
+								<div
+									className={`msg-text ${isStreaming ? 'streaming' : ''}`}
+									dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) + (isStreaming ? '<span class="cursor">|</span>' : '') }}
+								/>
+							);
+						}
+						return (
+							<>
+								{parts.map((part, idx) => {
+									if (part.type === 'command') {
+										return <CommandBlock key={idx} cmd={part.cmd} status={part.status} output={part.output} onCopy={onCopy} />;
+									}
+									if (!part.content.trim()) return null;
+									const isLastPart = idx === parts.length - 1;
+									return (
+										<div
+											key={idx}
+											className={`msg-text ${isStreaming && isLastPart ? 'streaming' : ''}`}
+											dangerouslySetInnerHTML={{ __html: renderMarkdown(part.content) + (isStreaming && isLastPart ? '<span class="cursor">|</span>' : '') }}
+										/>
+									);
+								})}
+							</>
+						);
+					})()}
 				</div>
 				{!isUser && (
 					<div className="msg-actions">

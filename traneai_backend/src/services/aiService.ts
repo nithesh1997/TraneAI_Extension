@@ -1,7 +1,11 @@
 import { AzureOpenAI } from 'openai';
 import fs from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { handleZenflowMessage } from './zenflowService';
+
+const execAsync = promisify(exec);
 
 const MODE_DUMMY_RESPONSES: Record<string, string> = {
   'new-joiner': "👋 **New Joiner Mode** is coming soon! This mode will help new team members get onboarded quickly. Stay tuned!",
@@ -63,15 +67,32 @@ export async function generateAIResponse(
         },
       },
     },
+    {
+      type: 'function' as const,
+      function: {
+        name: 'run_command',
+        description: 'Execute a shell command in the workspace directory. Use for git commands, npm/yarn commands, running tests, building, listing directory contents, or any shell operation requested by the user.',
+        parameters: {
+          type: 'object',
+          properties: {
+            command: { type: 'string', description: 'The shell command to execute' },
+          },
+          required: ['command'],
+        },
+      },
+    },
   ];
+
+  const commandBlocks: { cmd: string; status: string; output: string }[] = [];
 
   const messages: any[] = [
     { 
       role: 'system', 
       content: `You are TraneAI assistant. You were developed by Trane Technologies by Nithesh Kumar Ve.U (Developer and Architect) and Vempali, Mahalakshmi (Architect and QA).
-      You have access to the user's workspace files.
+      You have access to the user's workspace files and can execute shell commands.
       ${workspaceRoot ? `The workspace root is ${workspaceRoot}.` : ''}
       Use tools to explore the codebase when asked about files or the project structure.
+      When the user asks to run a command (git, npm, yarn, etc.), use the run_command tool to execute it.
       When listing or reading files, use relative paths from the workspace root.` 
     },
     ...(history || []),
@@ -101,6 +122,10 @@ export async function generateAIResponse(
         functionResponse = await listFiles(workspaceRoot, functionArgs.directory);
       } else if (functionName === 'read_file') {
         functionResponse = await readFile(functionArgs.filePath, workspaceRoot);
+      } else if (functionName === 'run_command') {
+        const result = await runCommand(functionArgs.command, workspaceRoot);
+        commandBlocks.push(result);
+        functionResponse = result.output;
       }
 
       messages.push({
@@ -118,7 +143,14 @@ export async function generateAIResponse(
     responseMessage = response.choices[0].message;
   }
 
-  return responseMessage.content || 'No response';
+  const finalContent = responseMessage.content || 'No response';
+  if (commandBlocks.length === 0) {
+    return finalContent;
+  }
+  const blockMarkers = commandBlocks
+    .map(b => `\`\`\`cmd-result\n${JSON.stringify(b)}\n\`\`\``)
+    .join('\n');
+  return `${blockMarkers}\n\n${finalContent}`;
 }
 
 async function listFiles(workspaceRoot?: string, directory: string = '.'): Promise<string> {
@@ -149,6 +181,18 @@ async function readFile(filePath: string, workspaceRoot?: string): Promise<strin
     return content;
   } catch (err: any) {
     return `Error reading file: ${err.message}`;
+  }
+}
+
+async function runCommand(command: string, workspaceRoot?: string): Promise<{ cmd: string; status: string; output: string }> {
+  try {
+    const cwd = workspaceRoot || process.cwd();
+    const { stdout, stderr } = await execAsync(command, { cwd, timeout: 30000, shell: true });
+    const output = (stdout + (stderr ? '\n' + stderr : '')).trim();
+    return { cmd: command, status: 'success', output: output || '(no output)' };
+  } catch (err: any) {
+    const output = ((err.stdout || '') + (err.stderr ? '\n' + err.stderr : '') || err.message || 'Command failed').trim();
+    return { cmd: command, status: 'error', output };
   }
 }
 
