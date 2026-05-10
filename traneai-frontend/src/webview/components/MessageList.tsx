@@ -27,4 +27,4 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({ messages, l
 			))}
 		</div>
 	);
-};
+});
