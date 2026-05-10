@@ -2,7 +2,7 @@ import React from 'react';
 
 type MessagePart =
   | { type: 'markdown'; content: string }
-  | { type: 'command'; cmd: string; status: string; output: string };
+  | { type: 'command'; cmd: string; status: string; output: string; duration?: number };
 
 const parseMessageParts = (text: string): MessagePart[] => {
   const parts: MessagePart[] = [];
@@ -16,7 +16,7 @@ const parseMessageParts = (text: string): MessagePart[] => {
     }
     try {
       const data = JSON.parse(match[1].trim());
-      parts.push({ type: 'command', cmd: data.cmd, status: data.status, output: data.output });
+      parts.push({ type: 'command', cmd: data.cmd, status: data.status, output: data.output, duration: data.duration });
     } catch {
       parts.push({ type: 'markdown', content: match[0] });
     }
@@ -30,57 +30,124 @@ const parseMessageParts = (text: string): MessagePart[] => {
   return parts;
 };
 
-const CommandBlock: React.FC<{ cmd: string; status: string; output: string; onCopy: (text: string) => void }> = ({ cmd, status, output, onCopy }) => {
-  const [copied, setCopied] = React.useState(false);
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  const handleCopy = () => {
+const highlightCmd = (raw: string): string => {
+  const tokens = raw.match(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`|[^\s]+|\s+)/g) || [];
+  let first = true;
+  return tokens.map(tok => {
+    if (/^\s+$/.test(tok)) return tok;
+    const e = escapeHtml(tok);
+    if (/^(".*"|'.*'|`.*`)$/.test(tok)) return `<span class="cmd-hl-str">${e}</span>`;
+    if (/^(&&|\|\||[;|>]{1,2})$/.test(tok)) return `<span class="cmd-hl-op">${e}</span>`;
+    if (/^--?[\w][\w-]*/.test(tok)) return `<span class="cmd-hl-flag">${e}</span>`;
+    if (/^([A-Za-z]:[\\/]|~?\/)[^\s]*/.test(tok)) return `<span class="cmd-hl-path">${e}</span>`;
+    if (first) { first = false; return `<span class="cmd-hl-bin">${e}</span>`; }
+    return e;
+  }).join('');
+};
+
+const formatDuration = (ms: number): string => {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+};
+
+const CopyIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+    <rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M3 11V3h8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+    <path d="M2 8l4 4 8-8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const CommandBlock: React.FC<{
+  cmd: string;
+  status: string;
+  output: string;
+  duration?: number;
+  onCopy: (text: string) => void;
+}> = ({ cmd, status, output, duration, onCopy }) => {
+  const [cmdCopied, setCmdCopied] = React.useState(false);
+  const [outCopied, setOutCopied] = React.useState(false);
+  const [outputOpen, setOutputOpen] = React.useState(false);
+
+  const hasOutput = output && output !== '(no output)';
+  const lineCount = hasOutput ? output.split('\n').length : 0;
+  const isSuccess = status === 'success';
+
+  const copyCmd = () => {
     onCopy(cmd);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setCmdCopied(true);
+    setTimeout(() => setCmdCopied(false), 1500);
+  };
+
+  const copyOut = () => {
+    onCopy(output);
+    setOutCopied(true);
+    setTimeout(() => setOutCopied(false), 1500);
   };
 
   return (
-    <div className="cmd-block">
-      <div className="cmd-block-header">
-        <span className="cmd-terminal-icon">
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-            <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.2" />
-            <path d="M4.5 6l2 2-2 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M8.5 10h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
-        </span>
-        <span className="cmd-text">{cmd}</span>
-        <button className="cmd-copy-btn" onClick={handleCopy} title="Copy command">
-          {copied ? (
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-              <path d="M2 8l4 4 8-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          ) : (
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-              <rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M3 11V3h8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
+    <div className={`cmd-block ${isSuccess ? 'cmd-success' : 'cmd-error'}`}>
+      <div className="cmd-block-toolbar">
+        <span className="cmd-prompt-symbol">&gt;_</span>
+        <button className="cmd-icon-btn" onClick={copyCmd} title="Copy command">
+          {cmdCopied ? <CheckIcon /> : <CopyIcon />}
         </button>
       </div>
-      <div className={`cmd-status ${status === 'success' ? 'cmd-status-success' : 'cmd-status-error'}`}>
-        <span className="cmd-status-dot"></span>
-        <span>Command executed</span>
-        {output && output !== '(no output)' && (
-          <details className="cmd-output-details">
-            <summary className="cmd-output-toggle">
-              <svg width="9" height="9" viewBox="0 0 16 16" fill="none">
-                <rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor" opacity="0.6" />
+
+      <div className="cmd-body">
+        <code
+          className="cmd-text"
+          dangerouslySetInnerHTML={{ __html: highlightCmd(cmd) }}
+        />
+      </div>
+
+      <div className="cmd-status-row">
+        <span className={`cmd-status-dot ${isSuccess ? 'dot-success' : 'dot-error'}`} />
+        <span className="cmd-status-label">Command executed</span>
+        {duration !== undefined && (
+          <span className="cmd-duration">{formatDuration(duration)}</span>
+        )}
+        <div className="cmd-status-right">
+          {hasOutput && (
+            <button
+              className={`cmd-toggle-btn ${outputOpen ? 'open' : ''}`}
+              onClick={() => setOutputOpen(o => !o)}
+              title={outputOpen ? 'Hide output' : `Show output (${lineCount} lines)`}
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.5" />
               </svg>
-            </summary>
-            <pre className="cmd-output">{output}</pre>
-          </details>
-        )}
-        {(!output || output === '(no output)') && (
-          <svg className="cmd-status-icon" width="9" height="9" viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor" opacity="0.6" />
-          </svg>
-        )}
+              {hasOutput && !outputOpen && lineCount > 0 && (
+                <span className="cmd-line-count">{lineCount}</span>
+              )}
+            </button>
+          )}
+          {!hasOutput && (
+            <svg className="cmd-sq-icon" width="10" height="10" viewBox="0 0 16 16" fill="none">
+              <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          )}
+        </div>
+      </div>
+
+      <div className={`cmd-output-panel ${outputOpen ? 'cmd-output-open' : ''}`}>
+        <div className="cmd-output-inner">
+          <div className="cmd-output-header">
+            <span className="cmd-output-lines">{lineCount} lines</span>
+            <button className="cmd-icon-btn cmd-out-copy" onClick={copyOut} title="Copy output">
+              {outCopied ? <CheckIcon /> : <CopyIcon />}
+            </button>
+          </div>
+          <pre className="cmd-output">{output}</pre>
+        </div>
       </div>
     </div>
   );
@@ -276,7 +343,7 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 							<>
 								{parts.map((part, idx) => {
 									if (part.type === 'command') {
-										return <CommandBlock key={idx} cmd={part.cmd} status={part.status} output={part.output} onCopy={onCopy} />;
+										return <CommandBlock key={idx} cmd={part.cmd} status={part.status} output={part.output} duration={part.duration} onCopy={onCopy} />;
 									}
 									if (!part.content.trim()) return null;
 									const isLastPart = idx === parts.length - 1;
