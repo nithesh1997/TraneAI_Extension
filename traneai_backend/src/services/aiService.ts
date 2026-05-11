@@ -1,19 +1,9 @@
 import { AzureOpenAI } from 'openai';
-import fs from 'fs';
-import path from 'path';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { handleZenflowMessage } from './zenflowService';
-
-const execAsync = promisify(exec);
-
-const MODE_DUMMY_RESPONSES: Record<string, string> = {
-  'new-joiner': "👋 **New Joiner Mode** is coming soon! This mode will help new team members get onboarded quickly. Stay tuned!",
-  'developers': "💻 **Developers Mode** is coming soon! This mode will provide advanced code analysis and developer tools. Stay tuned!",
-  'qa': "🧪 **QA Mode** is coming soon! This mode will assist with quality assurance workflows and test planning. Stay tuned!",
-  'eva': "🤖 **EVA Mode** is coming soon! This mode will provide specialized AI assistance. Stay tuned!",
-  'automated-testing': "🔄 **Automated Testing Mode** is coming soon! This mode will help you create and manage automated test suites. Stay tuned!",
-};
+import { MODE_DUMMY_RESPONSES } from './constants';
+import { AI_TOOLS } from './tools';
+import { listFiles, readFile } from './fileOperations';
+import { runCommand } from './commandRunner';
 
 export async function generateAIResponse(
   message: string,
@@ -39,63 +29,14 @@ export async function generateAIResponse(
     apiVersion: '2024-02-15-preview',
   });
 
-  const tools = [
-    {
-      type: 'function' as const,
-      function: {
-        name: 'list_files',
-        description: 'List files in a directory (max 2 levels deep)',
-        parameters: {
-          type: 'object',
-          properties: {
-            directory: { type: 'string', description: 'Relative path from workspace root' },
-          },
-        },
-      },
-    },
-    {
-      type: 'function' as const,
-      function: {
-        name: 'read_file',
-        description: 'Read the contents of a file',
-        parameters: {
-          type: 'object',
-          properties: {
-            filePath: { type: 'string', description: 'Relative path from workspace root' },
-          },
-          required: ['filePath'],
-        },
-      },
-    },
-    {
-      type: 'function' as const,
-      function: {
-        name: 'run_command',
-        description: 'Execute a shell command in the workspace directory. Use for git commands, npm/yarn commands, running tests, building, listing directory contents, or any shell operation requested by the user.',
-        parameters: {
-          type: 'object',
-          properties: {
-            command: { type: 'string', description: 'The shell command to execute' },
-          },
-          required: ['command'],
-        },
-      },
-    },
-  ];
+  const tools = AI_TOOLS;
 
   const commandBlocks: { cmd: string; status: string; output: string }[] = [];
 
   const messages: any[] = [
-    { 
-      role: 'system', 
-      content: `You are TraneAI assistant. You were developed by Trane Technologies by Nithesh Kumar Ve.U (Developer and Architect) and Vempali, Mahalakshmi (Architect and QA).
-      You have access to the user's workspace files and can execute shell commands.
-      ${workspaceRoot ? `The workspace root is ${workspaceRoot}.` : ''}
-      Use tools to explore the codebase when asked about files or the project structure.
-      When the user asks to run a command (git, npm, yarn, etc.), use the run_command tool to execute it.
-      When listing or reading files, use relative paths from the workspace root.` 
-    },
-    ...(history || []),
+    {
+      role: 'system',
+      content: `You are TraneAI, an advanced AI software engineering assistant developed by Trane Technologies by Nithesh Kumar Ve.U (Developer and Architect) and Vempali, Mahalakshmi (Architect and QA).You have full access to the user's workspace and development environment.Workspace:${workspaceRoot ? `- Workspace root: ${workspaceRoot}` : '- Workspace root is not available.'}Your capabilities:- Read files- Create new files- Edit existing files- Delete files- Refactor code- Generate production-ready code- Execute terminal commands- Analyze project structure- Debug build/runtime issues- Install dependencies- Run npm, yarn, pnpm, ng, git, docker, node, python, and shell commands- Understand full-stack applications- Work with React, Angular, Vue, Node.js, Express, TypeScript, Python, Java, SQL, Docker, and cloud projectsBehavior rules:1. You have permission to create, modify, and delete project files when required.2. Automatically explore the workspace using tools before answering technical questions.3. Use list_files to inspect directories.4. Use read_file before modifying or explaining code.5. Use run_command whenever terminal execution is needed.6. When editing code:   - Make intelligent production-level improvements.   - Preserve existing project architecture.   - Avoid unnecessary rewrites.   - Keep formatting and coding style consistent.7. If a bug exists:   - Identify root cause first.   - Then provide the cleanest fix.8. If dependencies are missing:   - Detect the package manager automatically.   - Suggest or run the correct install command.9. If build errors occur:   - Analyze logs carefully.   - Explain the actual issue clearly.   - Provide exact fixes.10. If the user asks for a feature:   - Implement complete working code.   - Include all required imports, state handling, API logic, and UI updates.Command behavior:- You can execute shell commands safely.- Always use relative paths from the workspace root.- Never invent terminal output.- Always return real execution results.- Summarize long command outputs clearly.Code generation rules:- Generate clean, maintainable, scalable code.- Follow best practices.- Prefer TypeScript where applicable.- Avoid placeholder implementations unless necessary.- Produce complete working solutions.Editing rules:- You may directly create and edit files.- When modifying files:  - Mention which files were updated.  - Explain the purpose briefly.- For dangerous actions (mass delete, reset, force commands), ask confirmation first.Response style:- Be concise and developer-focused.- Prefer complete updated code over partial snippets.- Avoid unnecessary explanations.- Focus on implementation and fixes.Security rules:- Never expose secrets, API keys, tokens, or passwords.- Warn users if sensitive data is detected.- Do not execute destructive system commands unless explicitly requested.You behave like a real AI coding agent integrated directly into the IDE.`    },    ...(history || []),
     { role: 'user', content: message }
   ];
 
@@ -151,50 +92,6 @@ export async function generateAIResponse(
     .map(b => `\`\`\`cmd-result\n${JSON.stringify(b)}\n\`\`\``)
     .join('\n');
   return `${blockMarkers}\n\n${finalContent}`;
-}
-
-async function listFiles(workspaceRoot?: string, directory: string = '.'): Promise<string> {
-  if (!workspaceRoot) return 'Workspace root not found.';
-  const targetDir = path.join(workspaceRoot, directory);
-  if (!fs.existsSync(targetDir)) return `Directory not found: ${directory}`;
-  
-  try {
-    const files = fs.readdirSync(targetDir, { withFileTypes: true });
-    let result = `Contents of ${directory}:\n`;
-    for (const file of files) {
-      if (file.name === 'node_modules' || file.name === '.git') continue;
-      result += `${file.isDirectory() ? '[DIR]' : '[FILE]'} ${file.name}\n`;
-    }
-    return result;
-  } catch (err: any) {
-    return `Error listing files: ${err.message}`;
-  }
-}
-
-async function readFile(filePath: string, workspaceRoot?: string): Promise<string> {
-  if (!workspaceRoot) return 'Workspace root not found.';
-  const fullPath = path.join(workspaceRoot, filePath);
-  if (!fs.existsSync(fullPath)) return `File not found: ${filePath}`;
-  
-  try {
-    const content = fs.readFileSync(fullPath, 'utf-8');
-    return content;
-  } catch (err: any) {
-    return `Error reading file: ${err.message}`;
-  }
-}
-
-async function runCommand(command: string, workspaceRoot?: string): Promise<{ cmd: string; status: string; output: string; duration: number }> {
-  const start = Date.now();
-  try {
-    const cwd = workspaceRoot || process.cwd();
-    const { stdout, stderr } = await execAsync(command, { cwd, timeout: 30000, shell: true });
-    const output = (stdout + (stderr ? '\n' + stderr : '')).trim();
-    return { cmd: command, status: 'success', output: output || '(no output)', duration: Date.now() - start };
-  } catch (err: any) {
-    const output = ((err.stdout || '') + (err.stderr ? '\n' + err.stderr : '') || err.message || 'Command failed').trim();
-    return { cmd: command, status: 'error', output, duration: Date.now() - start };
-  }
 }
 
 export async function generateVisionResponse(
