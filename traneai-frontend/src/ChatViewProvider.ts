@@ -6,6 +6,11 @@ import * as zlib from 'zlib';
 import * as crypto from 'crypto';
 import { exec } from 'child_process';
 import { buildWebviewHtml } from './webview/WebviewTemplate';
+import * as fileTools from './services/fileTools';
+import * as codeAnalysis from './services/codeAnalysis';
+import * as editConfirmation from './services/editConfirmation';
+import { CheckpointManager } from './services/checkpointManager';
+import { EditProposal } from './webview/components/Message';
 
 interface SessionMessage {
 	role: string;
@@ -43,8 +48,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 	private _currentSessionId: string = '';
 	private _userEmail: string = '';
+	private _checkpointManager: CheckpointManager;
 
-	constructor(private readonly _extensionUri: vscode.Uri) {}
+	constructor(private readonly _extensionUri: vscode.Uri) {
+		this._checkpointManager = new CheckpointManager(_extensionUri);
+	}
 
 	private _getTraneAIDir(): string {
 		const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -362,32 +370,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 				this._broadcastTyping(true);
 				this._abortController = new AbortController();
-				this._sendToBackend(data.text, data.model, data.attachments, this._abortController.signal).then((aiReply: string) => {
+				this._sendToBackend(data.text, data.model, data.attachments, this._abortController.signal).then(() => {
 					this._broadcastTyping(false);
-					const streamId = `ai-${Date.now()}`;
-					this._addMessage('ai', '', undefined, streamId, true);
-					let pos = 0;
-					this._streamInterval = setInterval(() => {
-					  if (pos >= aiReply.length) {
-						clearInterval(this._streamInterval);
-						this._streamInterval = undefined;
-						const index = this._messages.findIndex((m: any) => m.id === streamId);
-						if (index !== -1) {
-						  this._messages[index].isStreaming = false;
-						  this._syncMessages();
-						  this._saveCurrentSession();
-						  this._broadcastHistoryList();
-						}
-						return;
-					  }
-					  pos = Math.min(pos + 8, aiReply.length);
-					  const newText = aiReply.slice(0, pos);
-					  const index = this._messages.findIndex((m: any) => m.id === streamId);
-					  if (index !== -1) {
-						this._messages[index] = { ...this._messages[index]!, text: newText } as any;
-						this._syncMessages();
-					  }
-					}, 10);
+					this._saveCurrentSession();
+					this._broadcastHistoryList();
 				}).catch((error: any) => {
 					this._broadcastTyping(false);
 					if (error.name !== 'AbortError') {
@@ -434,6 +420,45 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			case 'cloneRepository':
 				vscode.commands.executeCommand('git.clone');
 				break;
+			case 'executeTool':
+				this._handleToolExecution(data.toolName, data.params);
+				break;
+			case 'analyzeFile':
+				this._handleFileAnalysis(data.filePath);
+				break;
+			case 'applyEdit':
+				this._handleApplyEdit(data.filePath, data.oldText, data.newText);
+				break;
+			case 'revertEdit':
+				this._handleRevertEdit(data.filePath, data.oldText, data.newText);
+				break;
+			case 'requestEditConfirmation':
+				this._handleEditConfirmation(data.filePath, data.oldText, data.newText);
+				break;
+			case 'applyPendingEdits':
+				this._applyAllPendingEdits();
+				break;
+			case 'discardPendingEdits':
+				this._discardPendingEdits();
+				break;
+			case 'getTools':
+				this._sendToolsList();
+				break;
+			case 'showDiff':
+				this._handleShowDiff(data.filePath, data.oldText, data.newText);
+				break;
+			case 'applyMultiEdit':
+				this._handleApplyMultiEdit(data.edits);
+				break;
+			case 'openFile':
+				this._handleOpenFile(data.path);
+				break;
+			case 'executeCommand':
+				this._handleExecuteCommand(data.cmd);
+				break;
+			case 'getWorkspaceRoot':
+				this._syncMessages();
+				break;
 		}
 	}
 
@@ -443,14 +468,32 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		if (this._panel) { this._panel.webview.postMessage(msg); }
 	}
 
-	private _addMessage(role: string, text: string, attachments?: any[], id: string = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, isStreaming = false) {
-		this._messages.push({ role, text, timestamp: Date.now(), attachments, id, isStreaming });
+	private _addMessage(role: 'user' | 'ai', text: string, attachments: any[] = [], id: string = `msg-${Date.now()}`, isStreaming = false) {
+		this._messages.push({
+			role,
+			text,
+			timestamp: Date.now(),
+			attachments,
+			id,
+			isStreaming
+		});
 		this._syncMessages();
 	}
 
+	private _updateMessageText(id: string, text: string, isStreaming = true) {
+		const msg = this._messages.find(m => m.id === id);
+		if (msg) {
+			msg.text = text;
+			msg.isStreaming = isStreaming;
+			this._syncMessages();
+		}
+	}
+
 	private _syncMessages() {
-		const workspaceOpen = !!vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0;
-		const message = { type: 'syncMessages', messages: this._messages, workspaceOpen };
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		const workspaceOpen = !!workspaceFolders && workspaceFolders.length > 0;
+		const workspaceRoot = workspaceOpen ? workspaceFolders![0].uri.fsPath : undefined;
+		const message = { type: 'syncMessages', messages: this._messages, workspaceOpen, workspaceRoot };
 		if (this._view) { this._view.webview.postMessage(message); }
 		if (this._panel) { this._panel.webview.postMessage(message); }
 	}
@@ -516,6 +559,267 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			}
 			this._addMessage('ai', response);
 		}, 1500);
+	}
+
+	private async _handleToolExecution(toolName: string, params: Record<string, any>) {
+		this._broadcastTyping(true);
+		this._addMessage('user', `Executing ${toolName}...`);
+		
+		try {
+			const result = await fileTools.executeTool(toolName, params);
+			this._broadcastTyping(false);
+			
+			if (result.success) {
+				this._addMessage('ai', result.message);
+			} else {
+				this._addMessage('ai', `❌ ${result.message}`);
+			}
+		} catch (error: any) {
+			this._broadcastTyping(false);
+			this._addMessage('ai', `Error: ${error.message}`);
+		}
+	}
+
+	private async _handleFileAnalysis(filePath: string) {
+		this._broadcastTyping(true);
+		this._addMessage('user', `Analyzing ${filePath}...`);
+		
+		try {
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			if (!workspaceFolders || workspaceFolders.length === 0) {
+				this._broadcastTyping(false);
+				this._addMessage('ai', 'No workspace open');
+				return;
+			}
+			
+			let uri: vscode.Uri;
+			if (filePath.startsWith('/') || filePath.match(/^[A-Za-z]:/)) {
+				uri = vscode.Uri.file(filePath);
+			} else {
+				uri = vscode.Uri.joinPath(workspaceFolders[0].uri, filePath);
+			}
+			
+			const result = await codeAnalysis.analyzeFileWithLSP(uri);
+			this._broadcastTyping(false);
+			
+			if (result.success && result.analysis) {
+				const md = codeAnalysis.generateAnalysisMarkdown(result.analysis);
+				this._addMessage('ai', md);
+			} else {
+				this._addMessage('ai', `Error: ${result.error}`);
+			}
+		} catch (error: any) {
+			this._broadcastTyping(false);
+			this._addMessage('ai', `Error: ${error.message}`);
+		}
+	}
+
+	private async _handleApplyEdit(filePath: string, oldText: string, newText: string) {
+		this._handleApplyMultiEdit([{ filePath, oldContent: oldText, newContent: newText }]);
+	}
+
+	private async _handleApplyMultiEdit(edits: EditProposal[]) {
+		this._broadcastTyping(true);
+		
+		try {
+			const filePaths = edits.map(e => e.filePath);
+			const checkpointId = await this._checkpointManager.createCheckpoint(filePaths);
+			
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			if (!workspaceFolders || workspaceFolders.length === 0) {
+				this._broadcastTyping(false);
+				this._addMessage('ai', 'No workspace open');
+				return;
+			}
+			
+			const workspaceEdit = new vscode.WorkspaceEdit();
+			let failureReason = '';
+			
+			for (const edit of edits) {
+				let uri: vscode.Uri | null = null;
+				
+				// 1. Try absolute path
+				if (edit.filePath.startsWith('/') || edit.filePath.match(/^[A-Za-z]:/)) {
+					if (fs.existsSync(edit.filePath)) {
+						uri = vscode.Uri.file(edit.filePath);
+					}
+				}
+				
+				// 2. Try relative to all workspace folders
+				if (!uri) {
+					for (const folder of workspaceFolders) {
+						const potentialPath = path.join(folder.uri.fsPath, edit.filePath);
+						if (fs.existsSync(potentialPath)) {
+							uri = vscode.Uri.file(potentialPath);
+							break;
+						}
+					}
+				}
+				
+				// 3. Fallback to first folder if still not found
+				if (!uri) {
+					uri = vscode.Uri.joinPath(workspaceFolders[0].uri, edit.filePath);
+				}
+				
+				try {
+					const doc = await vscode.workspace.openTextDocument(uri);
+					const content = doc.getText();
+					const startIndex = content.indexOf(edit.oldContent);
+					
+					if (startIndex === -1) {
+						failureReason = `Could not find exact text in ${edit.filePath}`;
+						break;
+					}
+					
+					const endIndex = startIndex + edit.oldContent.length;
+					workspaceEdit.replace(uri, new vscode.Range(doc.positionAt(startIndex), doc.positionAt(endIndex)), edit.newContent);
+				} catch (err) {
+					failureReason = `Could not open file ${edit.filePath}. Ensure it exists in the workspace.`;
+					break;
+				}
+			}
+			
+			if (failureReason) {
+				this._broadcastTyping(false);
+				this._addMessage('ai', `❌ Failed to apply edits: ${failureReason}`);
+				return;
+			}
+			
+			const applied = await vscode.workspace.applyEdit(workspaceEdit);
+			this._broadcastTyping(false);
+			
+			if (applied) {
+				// Save all affected docs
+				for (const edit of edits) {
+					let uri: vscode.Uri;
+					if (edit.filePath.startsWith('/') || edit.filePath.match(/^[A-Za-z]:/)) {
+						uri = vscode.Uri.file(edit.filePath);
+					} else {
+						uri = vscode.Uri.joinPath(workspaceFolders[0].uri, edit.filePath);
+					}
+					const doc = await vscode.workspace.openTextDocument(uri);
+					await doc.save();
+				}
+				
+				this._addMessage('ai', `✅ Successfully applied changes to ${edits.length} file(s). [Checkpoint: ${checkpointId}]`);
+			} else {
+				this._addMessage('ai', '❌ Failed to apply workspace edits.');
+			}
+		} catch (error: any) {
+			this._broadcastTyping(false);
+			this._addMessage('ai', `Error: ${error.message}`);
+		}
+	}
+
+	private async _handleRevertEdit(filePath: string, oldText: string, newText: string) {
+		this._addMessage('user', `Reverting changes in ${filePath}...`);
+		this._broadcastTyping(true);
+		
+		try {
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			if (!workspaceFolders || workspaceFolders.length === 0) {
+				this._broadcastTyping(false);
+				this._addMessage('ai', 'No workspace open');
+				return;
+			}
+			
+			let uri: vscode.Uri;
+			if (filePath.startsWith('/') || filePath.match(/^[A-Za-z]:/)) {
+				uri = vscode.Uri.file(filePath);
+			} else {
+				uri = vscode.Uri.joinPath(workspaceFolders[0].uri, filePath);
+			}
+			
+			const doc = await vscode.workspace.openTextDocument(uri);
+			const content = doc.getText();
+			
+			// Try exact match first
+			let startIndex = content.indexOf(newText);
+			
+			// If not found, try normalized match (ignoring line ending differences and trailing/leading whitespace)
+			if (startIndex === -1) {
+				const normalize = (s: string) => s.replace(/\r\n/g, '\n').trim();
+				const normalizedContent = normalize(content);
+				const normalizedNewText = normalize(newText);
+				
+				const normalizedIndex = normalizedContent.indexOf(normalizedNewText);
+				if (normalizedIndex !== -1) {
+					// We found it in normalized space. Now we need to find the equivalent index in the original doc.
+					// This is a bit tricky, but since we only normalized line endings and trim, 
+					// we can try to find a substring that matches.
+					// For most cases, a slightly fuzzy search or just searching for the first line is enough.
+					const firstLine = normalizedNewText.split('\n')[0].trim();
+					if (firstLine) {
+						startIndex = content.indexOf(firstLine);
+					}
+				}
+			}
+			
+			if (startIndex === -1) {
+				this._broadcastTyping(false);
+				this._addMessage('ai', 'Could not find the applied changes to revert. The file contents may have changed significantly.');
+				return;
+			}
+			
+			const endIndex = startIndex + newText.trim().length; 
+			// Use a safer range if needed, but the above is usually close enough for a single line/block replace.
+			const startPos = doc.positionAt(startIndex);
+			// Re-calculate endPos based on actual text in doc to be safe
+			const endPos = doc.positionAt(startIndex + newText.length);
+			
+			const edit = vscode.TextEdit.replace(
+				new vscode.Range(startPos, endPos),
+				oldText
+			);
+			
+			const workspaceEdit = new vscode.WorkspaceEdit();
+			workspaceEdit.set(uri, [edit]);
+			const applied = await vscode.workspace.applyEdit(workspaceEdit);
+			
+			this._broadcastTyping(false);
+			
+			if (applied) {
+				await doc.save();
+				this._addMessage('ai', `🔄 Reverted changes in ${filePath}`);
+			} else {
+				this._addMessage('ai', 'Failed to revert changes');
+			}
+		} catch (error: any) {
+			this._broadcastTyping(false);
+			this._addMessage('ai', `Error: ${error.message}`);
+		}
+	}
+
+	private async _handleEditConfirmation(filePath: string, oldText: string, newText: string) {
+		const editId = `edit-${Date.now()}`;
+		const result = await editConfirmation.requestConfirmation(
+			editId,
+			filePath,
+			oldText,
+			newText
+		);
+		
+		if (result.confirmed) {
+			await editConfirmation.applyEdit(editId);
+			if (result.applyAll) {
+				await editConfirmation.applyAllPendingEdits();
+			}
+		}
+	}
+
+	private async _applyAllPendingEdits() {
+		const count = await editConfirmation.applyAllPendingEdits();
+		this._addMessage('ai', `Applied ${count} pending edits`);
+	}
+
+	private async _discardPendingEdits() {
+		await editConfirmation.discardAllEdits();
+		this._addMessage('ai', 'Discarded all pending edits');
+	}
+
+	private _sendToolsList() {
+		const tools = fileTools.getToolsForAI();
+		this._addMessage('ai', `**Available File Operations:**\n\n${tools}\n\nUse these tools by sending a message like: "Read file src/index.ts" or "Create file src/test.ts with content..."`);
 	}
 
 	private _extractSymbols(content: string, language: string): { functions: string[], classes: string[], imports: string[] } {
@@ -633,19 +937,61 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				formData.append('images', blob, imageAttachment.name);
 			}
 
-			const response = await fetch('http://localhost:5000/api/chat/message', {
+			// Add a temporary placeholder message for typing/thinking
+			const aiMsgId = Date.now().toString();
+			this._addMessage('ai', '', [], aiMsgId, true);
+
+			const response = await fetch('http://localhost:5000/api/chat/message?stream=true', {
 				method: 'POST',
 				body: formData,
-				signal,
+				signal: signal as any,
 			});
 
 			if (!response.ok) {
-				throw new Error(`API failed with status ${response.status}`);
+				const error = await response.text();
+				throw new Error(`API failed: ${error}`);
 			}
 
-			const data = await response.json();
+			if (response.headers.get('content-type')?.includes('application/json')) {
+				const data = await response.json();
+				const reply = data.message || 'No response';
+				this._updateMessageText(aiMsgId, reply, false);
+				return reply;
+			}
 
-			return data.message || 'No response from AI.';
+			const reader = response.body?.getReader();
+			if (!reader) {
+				throw new Error('Streaming not supported');
+			}
+
+			let fullText = '';
+			const decoder = new TextDecoder();
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				const chunk = decoder.decode(value, { stream: true });
+				const lines = chunk.split('\n');
+
+				for (const line of lines) {
+					if (line.startsWith('data: ')) {
+						const data = JSON.parse(line.slice(6));
+						if (data.type === 'step') {
+							fullText += (fullText ? '\n' : '') + data.content;
+							this._updateMessageText(aiMsgId, fullText);
+						} else if (data.type === 'final') {
+							// For the final response, we remove the steps and just show the final content?
+							// Actually, Zencoder shows BOTH. The steps stay at the top.
+							// So we just update the whole text.
+							fullText = data.content;
+							this._updateMessageText(aiMsgId, fullText, false);
+						}
+					}
+				}
+			}
+
+			return fullText;
 		} catch (error: any) {
 			console.error('TraneAI API Error:', error);
 			return `Backend API error: ${error.message || 'Something went wrong'}`;
@@ -827,5 +1173,113 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 		const terminal = vscode.window.createTerminal({ name: 'TraneAI Review', pty });
 		terminal.show();
+	}
+	private async _handleShowDiff(filePath: string, oldText: string, newText: string) {
+		try {
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			if (!workspaceFolders || workspaceFolders.length === 0) {
+				vscode.window.showErrorMessage('No workspace open');
+				return;
+			}
+
+			let uri: vscode.Uri | null = null;
+			if (filePath.startsWith('/') || filePath.match(/^[A-Za-z]:/)) {
+				if (fs.existsSync(filePath)) {
+					uri = vscode.Uri.file(filePath);
+				}
+			}
+			
+			if (!uri) {
+				for (const folder of workspaceFolders) {
+					const potentialPath = path.join(folder.uri.fsPath, filePath);
+					if (fs.existsSync(potentialPath)) {
+						uri = vscode.Uri.file(potentialPath);
+						break;
+					}
+				}
+			}
+			
+			if (!uri) {
+				uri = vscode.Uri.joinPath(workspaceFolders[0].uri, filePath);
+			}
+
+			// Read current content as a base, but we will show the specific oldText -> newText diff
+			const doc = await vscode.workspace.openTextDocument(uri);
+			const currentContent = doc.getText();
+
+			// To show the REAL proposed diff accurately even after apply, we construct the 'before' and 'after'
+			// states based on the proposal.
+			let beforeContent = currentContent;
+			let afterContent = currentContent;
+
+			if (currentContent.includes(oldText)) {
+				// Base case: file still has old text
+				afterContent = currentContent.replace(oldText, newText);
+			} else if (currentContent.includes(newText)) {
+				// Already applied case: file has new text
+				beforeContent = currentContent.replace(newText, oldText);
+			} else {
+				// Fallback: just show the snippet diff if we can't find either in context
+				beforeContent = oldText;
+				afterContent = newText;
+			}
+
+			const tempDir = path.join(os.tmpdir(), 'traneai-diffs');
+			if (!fs.existsSync(tempDir)) {
+				fs.mkdirSync(tempDir, { recursive: true });
+			}
+			
+			const baseName = path.basename(filePath);
+			const tempOldPath = path.join(tempDir, `old-${baseName}`);
+			const tempNewPath = path.join(tempDir, `new-${baseName}`);
+			
+			fs.writeFileSync(tempOldPath, beforeContent);
+			fs.writeFileSync(tempNewPath, afterContent);
+
+			await vscode.commands.executeCommand(
+				'vscode.diff',
+				vscode.Uri.file(tempOldPath),
+				vscode.Uri.file(tempNewPath),
+				`TraneAI: ${baseName} (Diff Preview)`
+			);
+		} catch (error: any) {
+			vscode.window.showErrorMessage(`Failed to show diff: ${error.message}`);
+		}
+	}
+	private async _handleOpenFile(filePath: string) {
+		try {
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			if (!workspaceFolders) return;
+
+			let targetUri: vscode.Uri | undefined;
+
+			// Try absolute path first
+			if (path.isAbsolute(filePath) && fs.existsSync(filePath)) {
+				targetUri = vscode.Uri.file(filePath);
+			} else {
+				// Search in workspace folders
+				for (const folder of workspaceFolders) {
+					const fullPath = path.join(folder.uri.fsPath, filePath);
+					if (fs.existsSync(fullPath)) {
+						targetUri = vscode.Uri.file(fullPath);
+						break;
+					}
+				}
+			}
+
+			if (targetUri) {
+				const doc = await vscode.workspace.openTextDocument(targetUri);
+				await vscode.window.showTextDocument(doc, { preview: true });
+			} else {
+				vscode.window.showErrorMessage(`Could not find file: ${filePath}`);
+			}
+		} catch (error: any) {
+			vscode.window.showErrorMessage(`Failed to open file: ${error.message}`);
+		}
+	}
+	private _handleExecuteCommand(command: string) {
+		const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('TraneAI');
+		terminal.show();
+		terminal.sendText(command);
 	}
 }

@@ -1,15 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Tag } from 'antd';
 import { Attachment } from './Message';
 
 interface InputAreaProps {
-	onSendMessage: (text: string, model: string, attachments: Attachment[]) => void;
+	onSendMessage: (text: string, model: string, attachments: Attachment[], pinnedFiles?: string[]) => void;
 	onFilesSelected: (files: string[]) => void;
 	currentModel: string;
 	onModelChange: (model: string) => void;
 	terminalPath?: string;
 	isTyping?: boolean;
 	onStopGeneration?: () => void;
+	workspaceRoot?: string;
 }
 
 const MODELS = [
@@ -97,7 +98,7 @@ const CONTEXT_OPTIONS = [
 
 declare const vscode: any;
 
-export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration }) => {
+export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration, workspaceRoot: workspaceRootProp }) => {
 	const [text, setText] = useState(() => {
 		const state = vscode.getState();
 		return state?.inputText || '';
@@ -112,6 +113,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	});
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const [isDraggingOver, setIsDraggingOver] = useState(false);
 
 	// Persist input text and files
 	useEffect(() => {
@@ -122,25 +124,116 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		return () => clearTimeout(timer);
 	}, [text, attachedFiles]);
 
+	const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+	const [workspaceFolders, setWorkspaceFolders] = useState<string[]>([]);
+	const [filteredFiles, setFilteredFiles] = useState<string[]>([]);
+	const [filteredFolders, setFilteredFolders] = useState<string[]>([]);
+	const [showFileDropdown, setShowFileDropdown] = useState(false);
+	const [showFolderDropdown, setShowFolderDropdown] = useState(false);
+	const [mentionQuery, setMentionQuery] = useState('');
+
+	// Fetch workspace files and folders
+	useEffect(() => {
+		const fetchData = async () => {
+			try {
+				const state = vscode.getState();
+				const workspaceRoot = workspaceRootProp || state?.workspaceRoot;
+				
+				if (!workspaceRoot) {
+					vscode.postMessage({ command: 'getWorkspaceRoot' });
+					return;
+				}
+				
+				// Fetch files
+				const filesResponse = await fetch(`http://localhost:5000/api/workspace/files?root=${encodeURIComponent(workspaceRoot)}`);
+				if (filesResponse.ok) {
+					const files = await filesResponse.json();
+					setWorkspaceFiles(files);
+				}
+
+				// Fetch folders
+				const foldersResponse = await fetch(`http://localhost:5000/api/workspace/folders?root=${encodeURIComponent(workspaceRoot)}`);
+				if (foldersResponse.ok) {
+					const folders = await foldersResponse.json();
+					setWorkspaceFolders(folders);
+				}
+			} catch (error) {
+				console.error('Failed to fetch workspace data:', error);
+			}
+		};
+		fetchData();
+	}, [workspaceRootProp]);
+
 	const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 		const el = e.target;
 		el.style.height = 'auto';
-		el.style.height = Math.min(el.scrollHeight, 180) + 'px';
+		el.style.height = `${el.scrollHeight}px`;
 		const value = el.value;
 		setText(value);
 
-		// Detect @ trigger
 		const cursorPosition = el.selectionStart;
 		const textBeforeCursor = value.substring(0, cursorPosition);
+		const lastAtSymbolIndex = textBeforeCursor.lastIndexOf('@');
 		
-		if (textBeforeCursor.endsWith('@')) {
-			setShowContextDropdown(true);
+		if (lastAtSymbolIndex !== -1 && !textBeforeCursor.substring(lastAtSymbolIndex).includes(' ')) {
+			const query = textBeforeCursor.substring(lastAtSymbolIndex + 1);
+			setMentionQuery(query);
+			
+			if (query.length > 0) {
+				if (showFolderDropdown) {
+					setFilteredFolders(workspaceFolders.filter(f => f.toLowerCase().includes(query.toLowerCase())).slice(0, 8));
+				} else {
+					setFilteredFiles(workspaceFiles.filter(f => f.toLowerCase().includes(query.toLowerCase())).slice(0, 8));
+					setShowFileDropdown(true);
+				}
+				setShowContextDropdown(false);
+			} else {
+				// Just "@" - reset to main context menu
+				setShowFileDropdown(false);
+				setShowFolderDropdown(false);
+				setShowContextDropdown(true);
+			}
+			
 			setShowSkillsDropdown(false);
 			setShowModelDropdown(false);
 			setShowAttachmentDropdown(false);
 		} else {
+			setShowFileDropdown(false);
+			setShowFolderDropdown(false);
 			setShowContextDropdown(false);
 		}
+	};
+
+	const selectFileMention = (fileName: string) => {
+		const cursorPosition = textareaRef.current?.selectionStart || 0;
+		const textBeforeCursor = text.substring(0, cursorPosition);
+		const lastAtSymbolIndex = textBeforeCursor.lastIndexOf('@');
+		
+		const newText = text.substring(0, lastAtSymbolIndex) + '@' + fileName + ' ' + text.substring(cursorPosition);
+		setText(newText);
+		
+		if (!attachedFiles.find(f => f.name === fileName)) {
+			setAttachedFiles([...attachedFiles, { name: fileName, path: fileName, type: 'file' }]);
+		}
+		
+		setShowFileDropdown(false);
+		textareaRef.current?.focus();
+	};
+
+	const selectFolderMention = (folderName: string) => {
+		const cursorPosition = textareaRef.current?.selectionStart || 0;
+		const textBeforeCursor = text.substring(0, cursorPosition);
+		const lastAtSymbolIndex = textBeforeCursor.lastIndexOf('@');
+		
+		const newText = text.substring(0, lastAtSymbolIndex) + '@' + folderName + ' ' + text.substring(cursorPosition);
+		setText(newText);
+		
+		if (!attachedFiles.find(f => f.name === folderName)) {
+			setAttachedFiles([...attachedFiles, { name: folderName, path: folderName, type: 'folder' }]);
+		}
+		
+		setShowFolderDropdown(false);
+		textareaRef.current?.focus();
 	};
 
 	const handleKeydown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -162,13 +255,18 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			finalChatText = `${modeSkill}`;
 		}
 
-		onSendMessage(finalChatText, currentModel, attachedFiles);
-		setText('');
-		// Clear persisted state immediately on send
-		const state = vscode.getState() || {};
-		vscode.setState({ ...state, inputText: '', attachedFiles: [] });
+		const pinnedFiles = attachedFiles.filter(f => f.isPinned).map(f => f.path).filter(Boolean) as string[];
+		onSendMessage(finalChatText, currentModel, attachedFiles, pinnedFiles);
 		
-		setAttachedFiles([]);
+		setText('');
+		
+		// Keep only pinned files for the next message
+		const nextAttachedFiles = attachedFiles.filter(f => f.isPinned);
+		setAttachedFiles(nextAttachedFiles);
+
+		// Persist state
+		const state = vscode.getState() || {};
+		vscode.setState({ ...state, inputText: '', attachedFiles: nextAttachedFiles });
 		if (textareaRef.current) {
 			textareaRef.current.style.height = 'auto';
 		}
@@ -201,6 +299,65 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		setShowAttachmentDropdown(false);
 	};
 
+	// Helper: read a File/Blob as an Attachment
+	const readImageFile = useCallback((f: File): Promise<Attachment> => new Promise((resolve) => {
+		const reader = new FileReader();
+		reader.onload = (ev) => {
+			const dataUrl = ev.target?.result as string;
+			const base64 = dataUrl.split(',')[1];
+			resolve({ name: f.name || `pasted-image-${Date.now()}.png`, path: f.name || `pasted-image.png`, type: 'image', imageData: base64, mimeType: f.type || 'image/png' });
+		};
+		reader.readAsDataURL(f);
+	}), []);
+
+	// Handle paste events — intercept clipboard images
+	const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+		const items = Array.from(e.clipboardData?.items || []);
+		const imageItems = items.filter(item => item.type.startsWith('image/'));
+		if (imageItems.length === 0) return; // no images → let default text paste happen
+
+		e.preventDefault();
+		const files = imageItems.map(item => item.getAsFile()).filter(Boolean) as File[];
+		Promise.all(files.map(readImageFile)).then(newAttachments => {
+			const updatedFiles = [...attachedFiles, ...newAttachments];
+			setAttachedFiles(updatedFiles);
+			onFilesSelected(updatedFiles.map(f => f.name));
+		});
+	}, [attachedFiles, onFilesSelected, readImageFile]);
+
+	// Drag-and-drop handlers
+	const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+		const hasImages = Array.from(e.dataTransfer.items || []).some(i => i.type.startsWith('image/'));
+		if (!hasImages) return;
+		e.preventDefault();
+		setIsDraggingOver(true);
+	}, []);
+
+	const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+		// Only clear if leaving the container itself (not a child)
+		if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+			setIsDraggingOver(false);
+		}
+	}, []);
+
+	const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+		setIsDraggingOver(false);
+		e.preventDefault();
+		const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+		if (files.length === 0) return;
+		Promise.all(files.map(readImageFile)).then(newAttachments => {
+			const updatedFiles = [...attachedFiles, ...newAttachments];
+			setAttachedFiles(updatedFiles);
+			onFilesSelected(updatedFiles.map(f => f.name));
+		});
+	}, [attachedFiles, onFilesSelected, readImageFile]);
+
+	const togglePin = (index: number) => {
+		const newFiles = [...attachedFiles];
+		newFiles[index].isPinned = !newFiles[index].isPinned;
+		setAttachedFiles(newFiles);
+	};
+
 	const removeFile = (index: number) => {
 		const updatedFiles = attachedFiles.filter((_, i) => i !== index);
 		setAttachedFiles(updatedFiles);
@@ -208,9 +365,19 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	};
 
 	const selectContextOption = (id: string) => {
-		const newText = text.endsWith('@') ? text.slice(0, -1) : text;
-		setText(newText + '#' + id + ' ');
-		setShowContextDropdown(false);
+		if (id === 'files') {
+			setFilteredFiles(workspaceFiles.slice(0, 8));
+			setShowFileDropdown(true);
+			setShowContextDropdown(false);
+		} else if (id === 'folders') {
+			setFilteredFolders(workspaceFolders.slice(0, 8));
+			setShowFolderDropdown(true);
+			setShowContextDropdown(false);
+		} else {
+			const newText = text.endsWith('@') ? text.slice(0, -1) : text;
+			setText(newText + '#' + id + ' ');
+			setShowContextDropdown(false);
+		}
 		textareaRef.current?.focus();
 	};
 
@@ -238,7 +405,11 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			if (!target.closest('.model-selector')) setShowModelDropdown(false);
 			if (!target.closest('.skills-selector')) setShowSkillsDropdown(false);
 			if (!target.closest('.attachment-selector')) setShowAttachmentDropdown(false);
-			if (!target.closest('.context-dropdown')) setShowContextDropdown(false);
+			if (!target.closest('.context-dropdown')) {
+				setShowContextDropdown(false);
+				setShowFileDropdown(false);
+				setShowFolderDropdown(false);
+			}
 		};
 		window.addEventListener('click', handleClickOutside);
 		return () => window.removeEventListener('click', handleClickOutside);
@@ -250,7 +421,12 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	
 	return (
 		<div className="input-area">
-			<div className="input-container">
+			<div
+				className={`input-container${isDraggingOver ? ' drag-over' : ''}`}
+				onDragOver={handleDragOver}
+				onDragLeave={handleDragLeave}
+				onDrop={handleDrop}
+			>
 				{attachedFiles.length > 0 && (
 					<div className="attached-files">
 						{attachedFiles.map((file, index) => (
@@ -280,6 +456,10 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 										<path d="M2 4h12v8H2V4z" stroke="currentColor" strokeWidth="1.2" />
 										<path d="M4 8h1M6 8h3" stroke="currentColor" strokeWidth="1.2" />
 									</svg>
+								) : file.type === 'folder' ? (
+									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+										<path d="M1.5 3.5a1 1 0 011-1h4l1.5 1.5h6.5a1 1 0 011 1v7a1 1 0 01-1 1h-12a1 1 0 01-1-1v-8.5z" stroke="currentColor" strokeWidth="1.2" />
+									</svg>
 								) : (
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
 										<path d="M3 3h10v10H3V3z" stroke="currentColor" strokeWidth="1.2" />
@@ -290,6 +470,15 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 									{file.name}
 									{file.type === 'terminal' && <div className="chip-tooltip">{file.path}</div>}
 								</span>
+								<button 
+									className={`chip-pin-btn ${file.isPinned ? 'active' : ''}`}
+									onClick={(e) => { e.stopPropagation(); togglePin(index); }}
+									title={file.isPinned ? "Unpin from session" : "Pin to session context"}
+								>
+									<svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+										<path d="M8 2v6m0 0v6M8 8H2m6 0h6" stroke="currentColor" strokeWidth="2" transform={file.isPinned ? "" : "rotate(45 8 8)"} />
+									</svg>
+								</button>
 							</Tag>
 						))}
 					</div>
@@ -301,7 +490,36 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 					value={text}
 					onKeyDown={handleKeydown}
 					onInput={handleInput}
+					onPaste={handlePaste}
 				></textarea>
+				{showFileDropdown && filteredFiles.length > 0 && (
+					<div className="context-dropdown file-autocomplete show">
+						<div className="context-dropdown-label">Mention file to add to context</div>
+						{filteredFiles.map(file => (
+							<div key={file} className="context-item file-item" onClick={() => selectFileMention(file)}>
+								<div className="context-item-icon">📄</div>
+								<div className="context-item-content">
+									<div className="context-item-title">{file.split('/').pop()}</div>
+									<div className="context-item-description">{file}</div>
+								</div>
+							</div>
+						))}
+					</div>
+				)}
+				{showFolderDropdown && filteredFolders.length > 0 && (
+					<div className="context-dropdown folder-autocomplete show">
+						<div className="context-dropdown-label">Mention folder to add to context</div>
+						{filteredFolders.map(folder => (
+							<div key={folder} className="context-item folder-item" onClick={() => selectFolderMention(folder)}>
+								<div className="context-item-icon">📂</div>
+								<div className="context-item-content">
+									<div className="context-item-title">{folder.split('/').pop()}</div>
+									<div className="context-item-description">{folder}</div>
+								</div>
+							</div>
+						))}
+					</div>
+				)}
 				{showContextDropdown && (
 					<div className="context-dropdown show">
 						<div className="context-dropdown-label">Pin context with ⌥ Enter</div>

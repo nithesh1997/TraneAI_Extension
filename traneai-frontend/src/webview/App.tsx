@@ -12,7 +12,7 @@ import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
 import { WorkspaceEmptyState } from './components/WorkspaceEmptyState';
 import { ChatHistory, SessionSummary } from './components/ChatHistory';
-import { MessageData, Attachment } from './components/Message';
+import { MessageData, Attachment, EditProposal } from './components/Message';
 import { secureStore, secureRetrieve } from './utils/storage';
 
 const TAB_STORAGE_KEY = 'traneai_tab';
@@ -37,6 +37,10 @@ const ChatApp: React.FC = () => {
 	const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
 	const [currentSessionId, setCurrentSessionId] = useState('');
 	const [workspaceOpen, setWorkspaceOpen] = useState(true);
+	const [workspaceRoot, setWorkspaceRoot] = useState<string>(() => {
+		const state = vscode.getState();
+		return state?.workspaceRoot || '';
+	});
 	const [isLoading, setIsLoading] = useState(true);
 
 	useEffect(() => {
@@ -74,6 +78,11 @@ const ChatApp: React.FC = () => {
 					if (message.workspaceOpen !== undefined) {
 						setWorkspaceOpen(message.workspaceOpen);
 					}
+					if (message.workspaceRoot) {
+						setWorkspaceRoot(message.workspaceRoot);
+						const state = vscode.getState() || {};
+						vscode.setState({ ...state, workspaceRoot: message.workspaceRoot });
+					}
 					setIsLoading(false);
 					break;
 				case 'typing':
@@ -100,8 +109,8 @@ const ChatApp: React.FC = () => {
 		secureStore(TAB_STORAGE_KEY, { currentModel, authView, currentSessionId });
 	}, [currentModel, authView, currentSessionId]);
 
-	const handleSendMessage = useCallback((text: string, model: string, attachments: Attachment[]) => {
-		vscode.postMessage({ command: 'sendMessage', text, model, attachments });
+	const handleSendMessage = useCallback((text: string, model: string, attachments: Attachment[], pinnedFiles?: string[]) => {
+		vscode.postMessage({ command: 'sendMessage', text, model, attachments, pinnedFiles });
 	}, []);
 
 	const handleFilesSelected = useCallback((files: string[]) => {
@@ -154,6 +163,53 @@ const ChatApp: React.FC = () => {
 		vscode.postMessage({ command: 'cloneRepository' });
 	}, []);
 
+	const handleApplyEdit = useCallback((edit: EditProposal) => {
+		vscode.postMessage({ 
+			command: 'applyEdit', 
+			filePath: edit.filePath, 
+			oldText: edit.oldContent, 
+			newText: edit.newContent 
+		});
+	}, []);
+
+	const handleRejectEdit = useCallback((edit: EditProposal) => {
+		console.log('Edit rejected:', edit.filePath);
+	}, []);
+
+	const handleRevertEdit = useCallback((edit: EditProposal) => {
+		vscode.postMessage({ 
+			command: 'revertEdit', 
+			filePath: edit.filePath, 
+			oldText: edit.oldContent, 
+			newText: edit.newContent 
+		});
+	}, []);
+
+	const handleShowDiff = useCallback((edit: EditProposal) => {
+		vscode.postMessage({ 
+			command: 'showDiff', 
+			filePath: edit.filePath, 
+			oldText: edit.oldContent, 
+			newText: edit.newContent 
+		});
+	}, []);
+
+	const handleApplyMultiEdit = useCallback((edits: EditProposal[]) => {
+		vscode.postMessage({ 
+			command: 'applyMultiEdit', 
+			edits
+		});
+	}, []);
+
+	const handleFixCommand = useCallback((cmd: string, output: string) => {
+		const text = `I got an error while running: \`${cmd}\`\nOutput:\n\`\`\`\n${output}\n\`\`\`\nPlease fix this error.`;
+		handleSendMessage(text, currentModel, []);
+	}, [handleSendMessage, currentModel]);
+
+	const handleOpenFile = useCallback((filePath: string) => {
+		vscode.postMessage({ command: 'openFile', filePath });
+	}, []);
+
 	const isSidebar = document.body.classList.contains('sidebar');
 	const showRedirect = isFullScreen && isSidebar;
 
@@ -178,16 +234,6 @@ const ChatApp: React.FC = () => {
 		return <RedirectScreen logoUri={LOGO_URI} onRestore={handleRestore} />;
 	}
 
-	if (!workspaceOpen) {
-		return (
-			<WorkspaceEmptyState 
-				logoUri={LOGO_URI}
-				onOpenFolder={handleOpenFolder} 
-				onCloneRepository={handleCloneRepository} 
-			/>
-		);
-	}
-
 	return (
 		<div className="main-content">
 			<AppHeader
@@ -198,8 +244,23 @@ const ChatApp: React.FC = () => {
 			/>
 			<div id="chat-container" className="chat-container">
 				<HeroSection logoUri={LOGO_URI} onQuickSend={handleQuickSend} visible={messages.length === 0} currentModel={currentModel} />
-				<MessageList messages={messages} logoUri={LOGO_URI} onCopy={handleCopy} userEmail={email} />
-				<TypingIndicator logoUri={LOGO_URI} visible={isTyping} />
+				<MessageList 
+					messages={messages} 
+					logoUri={LOGO_URI} 
+					onCopy={handleCopy} 
+					userEmail={email} 
+					onApplyEdit={handleApplyEdit} 
+					onApplyMultiEdit={handleApplyMultiEdit}
+					onRejectEdit={handleRejectEdit} 
+					onRevertEdit={handleRevertEdit}
+					onShowDiff={handleShowDiff}
+					onOpenFile={handleOpenFile}
+					onFixCommand={handleFixCommand}
+				/>
+				<TypingIndicator 
+					logoUri={LOGO_URI} 
+					visible={isTyping && !messages.some(m => m.isStreaming)} 
+				/>
 			</div>
 			<div className="chat-input-section">
 				<InputArea
@@ -209,6 +270,7 @@ const ChatApp: React.FC = () => {
 					onModelChange={setCurrentModel}
 					isTyping={isTyping}
 					onStopGeneration={handleStopGeneration}
+					workspaceRoot={workspaceRoot}
 				/>
 				<ChatFooter />
 			</div>

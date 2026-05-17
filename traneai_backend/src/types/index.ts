@@ -22,6 +22,7 @@ export interface ChatRequest {
     content?: string;
     lineCount?: number;
   };
+  pinnedFiles?: string[];
 }
 
 export interface ChatResponse {
