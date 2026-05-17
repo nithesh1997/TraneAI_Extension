@@ -470,15 +470,6 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 									{file.name}
 									{file.type === 'terminal' && <div className="chip-tooltip">{file.path}</div>}
 								</span>
-								<button 
-									className={`chip-pin-btn ${file.isPinned ? 'active' : ''}`}
-									onClick={(e) => { e.stopPropagation(); togglePin(index); }}
-									title={file.isPinned ? "Unpin from session" : "Pin to session context"}
-								>
-									<svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-										<path d="M8 2v6m0 0v6M8 8H2m6 0h6" stroke="currentColor" strokeWidth="2" transform={file.isPinned ? "" : "rotate(45 8 8)"} />
-									</svg>
-								</button>
 							</Tag>
 						))}
 					</div>
