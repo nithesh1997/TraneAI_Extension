@@ -1,14 +1,15 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import cookieParser from 'cookie-parser';
 import chatRoutes from './routes/chat.js';
+import workspaceRoutes from './routes/workspace.js';
 import { swaggerOptions } from './swagger.js';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -25,6 +26,7 @@ app.use(cookieParser());
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 app.use('/api/chat', chatRoutes);
+app.use('/api/workspace', workspaceRoutes);
 // app.use('/api/auth', authRoutes);
 // app.get('/health', (req, res) => {
 //   res.json({ status: 'ok', timestamp: new Date().toISOString() });
