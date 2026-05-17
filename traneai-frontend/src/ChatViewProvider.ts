@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as zlib from 'zlib';
 import * as crypto from 'crypto';
-import { exec } from 'child_process';
+import { exec, ChildProcess } from 'child_process';
 import { buildWebviewHtml } from './webview/WebviewTemplate';
 import * as fileTools from './services/fileTools';
 import * as codeAnalysis from './services/codeAnalysis';
@@ -366,6 +366,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				if (data.text.includes('@comprehensive-review')) {
 					this._runComprehensiveReview();
 					return;
+				}
+
+				if (data.model === 'qa' && data.text.includes('@research')) {
+					const ticketMatch = data.text.match(/@research\s+([A-Za-z]+-\d+)/i);
+					if (ticketMatch) {
+						this._runQAResearchWorkflow(ticketMatch[1]);
+						return;
+					}
 				}
 
 				this._broadcastTyping(true);
@@ -1101,6 +1109,269 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
+	private _runQAResearchWorkflow(ticketId: string) {
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders) {
+			vscode.window.showErrorMessage('No workspace folder open.');
+			return;
+		}
+
+		const rootPath = workspaceFolders[0].uri.fsPath;
+		const writeEmitter = new vscode.EventEmitter<string>();
+
+		const log = (msg: string) => writeEmitter.fire(msg.replace(/\n/g, '\r\n'));
+		const statusMessageId = `qa-status-${ticketId}-${Date.now()}`;
+		const statusLines: string[] = [];
+		const pushStatus = (text: string) => {
+			statusLines.push(`- ${text}`);
+			this._updateMessageText(statusMessageId, `🔬 **QA Research: ${ticketId}**\n\n${statusLines.join('\n')}`, false);
+		};
+		const managedProcesses = new Set<ChildProcess>();
+		let workflowClosed = false;
+		const registerProcess = (proc: ChildProcess) => {
+			managedProcesses.add(proc);
+			proc.on('exit', () => managedProcesses.delete(proc));
+			proc.on('error', () => managedProcesses.delete(proc));
+			return proc;
+		};
+		const cleanupProcesses = (reason: string) => {
+			if (workflowClosed) {
+				return;
+			}
+			workflowClosed = true;
+			pushStatus(reason);
+			for (const proc of managedProcesses) {
+				const pid = proc.pid;
+				if (!pid) {
+					continue;
+				}
+				if (process.platform === 'win32') {
+					exec(`taskkill /PID ${pid} /T /F`);
+				} else {
+					try {
+						proc.kill('SIGTERM');
+					} catch {
+					}
+				}
+			}
+			managedProcesses.clear();
+			process.removeListener('exit', onExtensionHostExit);
+		};
+		const onExtensionHostExit = () => cleanupProcesses('Workflow stopped: Extension host is shutting down.');
+		process.once('exit', onExtensionHostExit);
+
+		const pty: vscode.Pseudoterminal = {
+			onDidWrite: writeEmitter.event,
+			handleInput: (data: string) => {
+				if (data === '\x03') {
+					log(`\r\n\x1b[31m^C\x1b[0m\r\n`);
+					cleanupProcesses('Workflow stopped by user (Ctrl+C).');
+				}
+			},
+			open: () => {
+				log(`\x1b[34m╔══════════════════════════════════════════╗\x1b[0m\r\n`);
+				log(`\x1b[34m║  TraneAI QA Research: ${ticketId.padEnd(19)}║\x1b[0m\r\n`);
+				log(`\x1b[34m╚══════════════════════════════════════════╝\x1b[0m\r\n\r\n`);
+
+				pushStatus('Step 1/5: Analyzing project structure...');
+				log(`\x1b[33m[Step 1/5] Analyzing project structure...\x1b[0m\r\n`);
+
+				let packageJson: any = {};
+				const packageJsonPath = path.join(rootPath, 'package.json');
+				try {
+					packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+					log(`\x1b[32m  ✓ Project : ${packageJson.name || 'Unknown'} (v${packageJson.version || '?'})\x1b[0m\r\n`);
+					const scriptNames = Object.keys(packageJson.scripts || {});
+					if (scriptNames.length > 0) {
+						log(`\x1b[32m  ✓ Scripts : ${scriptNames.join(', ')}\x1b[0m\r\n`);
+					}
+					pushStatus(`Step 1/5 complete: Project **${packageJson.name || 'Unknown'}** detected.`);
+				} catch {
+					log(`\x1b[33m  ⚠ Could not read package.json\x1b[0m\r\n`);
+					pushStatus('Step 1/5 warning: Could not read `package.json`. Continuing with defaults.');
+				}
+
+				pushStatus('Step 2/5: Checking git status...');
+				log(`\r\n\x1b[33m[Step 2/5] Checking git status...\x1b[0m\r\n`);
+
+				const gitStatus = registerProcess(exec('git status --short', { cwd: rootPath }));
+				let gitStatusOutput = '';
+				gitStatus.stdout?.on('data', (d) => {
+					const text = d.toString();
+					gitStatusOutput += text;
+					log(`  ${text}`);
+				});
+				gitStatus.stderr?.on('data', (d) => log(`\x1b[31m  ${d.toString()}\x1b[0m`));
+
+				gitStatus.on('exit', () => {
+					if (workflowClosed) {
+						return;
+					}
+					const changedCount = gitStatusOutput.split('\n').map(line => line.trim()).filter(Boolean).length;
+					pushStatus(changedCount > 0
+						? `Step 2/5 complete: Git status found **${changedCount}** changed entries.`
+						: 'Step 2/5 complete: Working tree is clean.');
+
+					pushStatus(`Step 3/5: Searching for branch matching **${ticketId}**...`);
+					log(`\r\n\x1b[33m[Step 3/5] Searching for branch: ${ticketId}...\x1b[0m\r\n`);
+
+					const gitBranch = registerProcess(exec('git branch -a', { cwd: rootPath }));
+					let branchOutput = '';
+					gitBranch.stdout?.on('data', (d) => { branchOutput += d.toString(); });
+					gitBranch.stderr?.on('data', (d) => log(`\x1b[31m  ${d.toString()}\x1b[0m`));
+
+					gitBranch.on('exit', () => {
+						if (workflowClosed) {
+							return;
+						}
+						const allBranches = branchOutput
+							.split('\n')
+							.map(b => b.trim().replace(/^\*\s*/, ''))
+							.filter(Boolean);
+
+						const matchingBranch = allBranches.find(b =>
+							b.toLowerCase().includes(ticketId.toLowerCase())
+						);
+
+						const startApplication = () => {
+							pushStatus('Step 5/5: Starting the application...');
+							log(`\r\n\x1b[33m[Step 5/5] Starting the application...\x1b[0m\r\n`);
+
+							const scripts = packageJson.scripts || {};
+							const startCmd = scripts['dev']
+								? 'npm run dev'
+								: scripts['start']
+								? 'npm start'
+								: scripts['serve']
+								? 'npm run serve'
+								: 'npm start';
+
+							log(`\x1b[32m  → Running: ${startCmd}\x1b[0m\r\n`);
+							pushStatus(`Step 5/5 in progress: Running \`${startCmd}\`.`);
+
+							const startProc = registerProcess(exec(startCmd, { cwd: rootPath }));
+							let hasOpenedUrl = false;
+
+							const detectAndOpenUrl = (output: string) => {
+								if (hasOpenedUrl || workflowClosed) return;
+								const clean = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+								const urlMatch = clean.match(
+									/https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[\w.-]+)(:\d+)?(\/[^\s]*)?/i
+								);
+								if (urlMatch) {
+									const url = urlMatch[0].replace(/[.,!?;:]+$/, '');
+									hasOpenedUrl = true;
+									log(`\r\n\x1b[32m  ✓ Application running at: ${url}\x1b[0m\r\n`);
+									log(`\x1b[32m  → Opening in VS Code browser...\x1b[0m\r\n`);
+									pushStatus(`Step 5/5 complete: App is running at **${url}**. Opening VS Code browser now.`);
+									setTimeout(() => {
+										vscode.commands.executeCommand('trane-ai.openUrl', url);
+									}, 1500);
+								}
+							};
+
+							startProc.stdout?.on('data', (d) => {
+								log(d.toString());
+								detectAndOpenUrl(d.toString());
+							});
+							startProc.stderr?.on('data', (d) => {
+								log(d.toString());
+								detectAndOpenUrl(d.toString());
+							});
+							startProc.on('error', (err) => {
+								log(`\r\n\x1b[31m  ✗ Start failed: ${err.message}\x1b[0m\r\n`);
+								pushStatus(`Step 5/5 failed: ${err.message}`);
+							});
+						};
+
+						const checkDependenciesAndContinue = () => {
+							pushStatus('Step 4/5: Checking whether dependencies are already installed...');
+							log(`\r\n\x1b[33m[Step 4/5] Checking dependencies...\x1b[0m\r\n`);
+
+							const nodeModulesPath = path.join(rootPath, 'node_modules');
+							const hasNodeModules = fs.existsSync(nodeModulesPath);
+							const requiredDeps = [
+								...Object.keys(packageJson.dependencies || {}),
+								...Object.keys(packageJson.devDependencies || {})
+							];
+							const missingDeps = hasNodeModules
+								? requiredDeps.filter(dep => !fs.existsSync(path.join(nodeModulesPath, ...dep.split('/'))))
+								: requiredDeps;
+
+							if (missingDeps.length === 0) {
+								log(`\x1b[32m  ✓ Dependencies already installed — skipping install\x1b[0m\r\n`);
+								pushStatus('Step 4/5 complete: Dependencies already installed. Skipping install.');
+								startApplication();
+								return;
+							}
+
+							const useYarn = fs.existsSync(path.join(rootPath, 'yarn.lock'));
+							const installCmd = useYarn ? 'yarn install' : 'npm install';
+							log(`\x1b[33m  ⚠ Missing dependencies detected (${missingDeps.length})\x1b[0m\r\n`);
+							log(`\x1b[32m  → Running: ${installCmd}\x1b[0m\r\n`);
+							pushStatus(`Step 4/5 in progress: Found **${missingDeps.length}** missing dependencies. Running \`${installCmd}\`.`);
+
+							const installProc = registerProcess(exec(installCmd, { cwd: rootPath }));
+							installProc.stdout?.on('data', (d) => log(d.toString()));
+							installProc.stderr?.on('data', (d) => log(d.toString()));
+
+							installProc.on('exit', (code) => {
+								if (workflowClosed) {
+									return;
+								}
+								if (code !== 0) {
+									log(`\r\n\x1b[31m  ✗ Installation failed (exit code ${code})\x1b[0m\r\n`);
+									pushStatus(`Step 4/5 failed: Dependency installation failed (exit code ${code}).`);
+									return;
+								}
+								log(`\r\n\x1b[32m  ✓ Dependencies installed successfully\x1b[0m\r\n`);
+								pushStatus('Step 4/5 complete: Missing dependencies were installed successfully.');
+								startApplication();
+							});
+						};
+
+						if (matchingBranch) {
+							const cleanBranch = matchingBranch.replace(/^remotes\/origin\//, '');
+							log(`\x1b[32m  ✓ Found branch: ${cleanBranch}\x1b[0m\r\n`);
+							log(`\x1b[32m  → Checking out: ${cleanBranch}...\x1b[0m\r\n`);
+							pushStatus(`Step 3/5: Found branch **${cleanBranch}**. Checking out...`);
+
+							const gitCheckout = registerProcess(exec(`git checkout ${cleanBranch}`, { cwd: rootPath }));
+							gitCheckout.stdout?.on('data', (d) => log(d.toString()));
+							gitCheckout.stderr?.on('data', (d) => log(d.toString()));
+
+							gitCheckout.on('exit', (code) => {
+								if (workflowClosed) {
+									return;
+								}
+								if (code === 0) {
+									log(`\x1b[32m  ✓ Checked out ${cleanBranch}\x1b[0m\r\n`);
+									pushStatus(`Step 3/5 complete: Checked out branch **${cleanBranch}**.`);
+								} else {
+									log(`\x1b[33m  ⚠ Checkout had issues, continuing on current branch...\x1b[0m\r\n`);
+									pushStatus('Step 3/5 warning: Checkout had issues. Continuing on current branch.');
+								}
+								checkDependenciesAndContinue();
+							});
+						} else {
+							log(`\x1b[33m  ⚠ No branch matching "${ticketId}" found — continuing on current branch\x1b[0m\r\n`);
+							pushStatus(`Step 3/5 warning: No branch matching **${ticketId}** found. Continuing on current branch.`);
+							checkDependenciesAndContinue();
+						}
+					});
+				});
+			},
+			close: () => {
+				cleanupProcesses('Workflow stopped: Terminal was closed. Background processes were terminated.');
+			}
+		};
+
+		this._addMessage('ai', `🔬 **QA Research: ${ticketId}**\n\n- Workflow initialized\n- Status updates will appear here as a running list`, [], statusMessageId, false);
+
+		const terminal = vscode.window.createTerminal({ name: `TraneAI QA: ${ticketId}`, pty });
+		terminal.show();
+	}
+
 	private _runComprehensiveReview() {
 		const workspaceFolders = vscode.workspace.workspaceFolders;
 		if (!workspaceFolders) {
@@ -1110,14 +1381,39 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 		const rootPath = workspaceFolders[0].uri.fsPath;
 		const writeEmitter = new vscode.EventEmitter<string>();
-		
+		const reviewProcesses = new Set<ChildProcess>();
+		let reviewClosed = false;
+
+		const killReviewProcesses = () => {
+			if (reviewClosed) return;
+			reviewClosed = true;
+			for (const proc of reviewProcesses) {
+				const pid = proc.pid;
+				if (!pid) continue;
+				if (process.platform === 'win32') {
+					exec(`taskkill /PID ${pid} /T /F`);
+				} else {
+					try { proc.kill('SIGTERM'); } catch {}
+				}
+			}
+			reviewProcesses.clear();
+		};
+
 		const pty: vscode.Pseudoterminal = {
 			onDidWrite: writeEmitter.event,
+			handleInput: (data: string) => {
+				if (data === '\x03') {
+					writeEmitter.fire('\r\n\x1b[31m^C\x1b[0m\r\n');
+					killReviewProcesses();
+				}
+			},
 			open: () => {
 				writeEmitter.fire('\x1b[34m--- TraneAI Comprehensive Review ---\x1b[0m\r\n');
 				writeEmitter.fire('\x1b[33mStep 1: Installing dependencies (npm i)...\x1b[0m\r\n');
 				
 				const installProcess = exec('npm i', { cwd: rootPath });
+				reviewProcesses.add(installProcess);
+				installProcess.on('exit', () => reviewProcesses.delete(installProcess));
 				
 				installProcess.stdout?.on('data', (data) => {
 					writeEmitter.fire(data.toString().replace(/\n/g, '\r\n'));
@@ -1128,6 +1424,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				});
 				
 				installProcess.on('exit', (code) => {
+					if (reviewClosed) return;
 					if (code !== 0) {
 						writeEmitter.fire(`\r\n\x1b[31m[ERROR] npm install failed with code ${code}\x1b[0m\r\n`);
 						return;
@@ -1136,9 +1433,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 					writeEmitter.fire('\r\n\x1b[33mStep 2: Starting application (npm start)...\x1b[0m\r\n');
 					
 					const startProcess = exec('npm start', { cwd: rootPath });
+					reviewProcesses.add(startProcess);
+					startProcess.on('exit', () => reviewProcesses.delete(startProcess));
 					let hasOpenedUrl = false;
 					
 					startProcess.stdout?.on('data', (data) => {
+						if (reviewClosed) return;
 						const output = data.toString();
 						writeEmitter.fire(output.replace(/\n/g, '\r\n'));
 						
@@ -1151,7 +1451,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 								writeEmitter.fire(`\r\n\x1b[32m[INFO] Found hosting URL: ${url}\x1b[0m\r\n`);
 								writeEmitter.fire('\x1b[32m[INFO] Opening browser with URL...\x1b[0m\r\n');
 								
-								// Small delay to ensure server is ready
 								setTimeout(() => {
 									vscode.commands.executeCommand('trane-ai.openUrl', url);
 								}, 1500);
@@ -1160,6 +1459,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 					});
 					
 					startProcess.stderr?.on('data', (data) => {
+						if (reviewClosed) return;
 						writeEmitter.fire(data.toString().replace(/\n/g, '\r\n'));
 					});
 					
@@ -1168,7 +1468,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 					});
 				});
 			},
-			close: () => {}
+			close: () => {
+				killReviewProcesses();
+			}
 		};
 
 		const terminal = vscode.window.createTerminal({ name: 'TraneAI Review', pty });
