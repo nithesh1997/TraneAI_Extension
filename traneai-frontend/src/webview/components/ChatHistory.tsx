@@ -17,17 +17,41 @@ interface ChatHistoryProps {
 	onNewChat: () => void;
 }
 
-function formatRelativeTime(timestamp: number): string {
-	const diff = Date.now() - timestamp;
-	const minutes = Math.floor(diff / 60000);
-	const hours = Math.floor(diff / 3600000);
-	const days = Math.floor(diff / 86400000);
+type GroupLabel = 'Today' | 'Yesterday' | 'Last 7 days' | 'Last 30 days' | 'Older';
 
-	if (minutes < 1) { return 'just now'; }
-	if (minutes < 60) { return `${minutes}m ago`; }
-	if (hours < 24) { return `${hours}h ago`; }
-	if (days < 7) { return `${days}d ago`; }
-	return new Date(timestamp).toLocaleDateString();
+interface SessionGroup {
+	label: GroupLabel;
+	sessions: SessionSummary[];
+}
+
+function getGroupLabel(timestamp: number): GroupLabel {
+	const now = new Date();
+	const date = new Date(timestamp);
+	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+	const yesterdayStart = todayStart - 86400000;
+	const sevenDaysAgo = todayStart - 6 * 86400000;
+	const thirtyDaysAgo = todayStart - 29 * 86400000;
+
+	if (timestamp >= todayStart) return 'Today';
+	if (timestamp >= yesterdayStart) return 'Yesterday';
+	if (timestamp >= sevenDaysAgo) return 'Last 7 days';
+	if (timestamp >= thirtyDaysAgo) return 'Last 30 days';
+	return 'Older';
+}
+
+function groupSessions(sessions: SessionSummary[]): SessionGroup[] {
+	const order: GroupLabel[] = ['Today', 'Yesterday', 'Last 7 days', 'Last 30 days', 'Older'];
+	const map = new Map<GroupLabel, SessionSummary[]>();
+
+	for (const session of sessions) {
+		const label = getGroupLabel(session.updatedAt);
+		if (!map.has(label)) map.set(label, []);
+		map.get(label)!.push(session);
+	}
+
+	return order
+		.filter(label => map.has(label))
+		.map(label => ({ label, sessions: map.get(label)! }));
 }
 
 export const ChatHistory: React.FC<ChatHistoryProps> = ({
@@ -39,6 +63,8 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
 	onDeleteSession,
 	onNewChat,
 }) => {
+	const groups = groupSessions(sessions);
+
 	return (
 		<>
 			{visible && <div className="history-overlay" onClick={onClose} />}
@@ -63,26 +89,30 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
 					{sessions.length === 0 ? (
 						<div className="history-empty">No previous chats yet</div>
 					) : (
-						sessions.map(session => (
-							<div
-								key={session.id}
-								className={`history-item${session.id === currentSessionId ? ' history-item--active' : ''}`}
-								onClick={() => { onLoadSession(session.id); onClose(); }}
-							>
-								<div className="history-item-title">{session.title}</div>
-								<div className="history-item-meta">
-									<span className="history-item-time">{formatRelativeTime(session.updatedAt)}</span>
-									<span className="history-item-count">{session.messageCount} msg{session.messageCount !== 1 ? 's' : ''}</span>
-								</div>
-								<button
-									className="history-item-delete"
-									title="Delete"
-									onClick={e => { e.stopPropagation(); onDeleteSession(session.id); }}
-								>
-									<svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-										<path d="M3 4h10M6 4V3h4v1M5 4l.5 9h5l.5-9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-									</svg>
-								</button>
+						groups.map(group => (
+							<div key={group.label} className="history-group">
+								<div className="history-group-label">{group.label}</div>
+								{group.sessions.map(session => (
+									<div
+										key={session.id}
+										className={`history-item${session.id === currentSessionId ? ' history-item--active' : ''}`}
+										onClick={() => { onLoadSession(session.id); onClose(); }}
+									>
+										<div className="history-item-title">{session.title}</div>
+										{session.id === currentSessionId && (
+											<span className="history-item-current">Current</span>
+										)}
+										<button
+											className="history-item-delete"
+											title="Delete"
+											onClick={e => { e.stopPropagation(); onDeleteSession(session.id); }}
+										>
+											<svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+												<path d="M3 4h10M6 4V3h4v1M5 4l.5 9h5l.5-9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+											</svg>
+										</button>
+									</div>
+								))}
 							</div>
 						))
 					)}
