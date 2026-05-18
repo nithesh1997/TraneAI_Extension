@@ -70,13 +70,41 @@ const getRelativeTime = (ts: number): string => {
 	return `${Math.floor(diffMin / 60)}h ago`;
 };
 
-const renderMarkdown = (text: string): string => {
-	// Simple markdown renderer for the demo
+const processInlineMarkdown = (text: string): string => {
 	return text
 		.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 		.replace(/`([^`]+)`/g, '<code>$1</code>')
 		.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
 		.replace(/\n/g, '<br/>');
+};
+
+const renderMarkdown = (text: string): string => {
+	const parts: string[] = [];
+	const codeBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
+	let lastIndex = 0;
+	let match;
+
+	while ((match = codeBlockRegex.exec(text)) !== null) {
+		if (match.index > lastIndex) {
+			parts.push(processInlineMarkdown(text.substring(lastIndex, match.index)));
+		}
+		const lang = match[1] || 'plaintext';
+		const code = match[2]
+			.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		parts.push(
+			`<div class="md-code-block">` +
+			`<div class="md-code-header"><span class="md-code-lang">${lang}</span></div>` +
+			`<pre><code class="language-${lang}">${code}</code></pre>` +
+			`</div>`
+		);
+		lastIndex = codeBlockRegex.lastIndex;
+	}
+
+	if (lastIndex < text.length) {
+		parts.push(processInlineMarkdown(text.substring(lastIndex)));
+	}
+
+	return parts.join('');
 };
 
 // --- Components ---

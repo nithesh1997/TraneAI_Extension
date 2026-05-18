@@ -296,6 +296,36 @@
     color: #f97316;
   }
 
+  .md-code-block {
+    margin: 8px 0;
+    border: 1px solid var(--code-border);
+    border-radius: 8px;
+    overflow: hidden;
+
+    .md-code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border-bottom: 1px solid var(--code-border);
+
+      .md-code-lang {
+        font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: lowercase;
+        letter-spacing: 0.3px;
+      }
+    }
+
+    pre {
+      margin: 0;
+      border: none;
+      border-radius: 0;
+    }
+  }
+
   pre {
     background: var(--code-bg);
     border: 1px solid var(--code-border);

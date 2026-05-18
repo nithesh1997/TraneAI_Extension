@@ -1,6 +1,40 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Tag } from 'antd';
 import { Attachment } from './Message';
+import hljs from 'highlight.js';
+
+interface CodeBlock {
+	id: number;
+	code: string;
+}
+
+function detectAndHighlight(code: string): { language: string; html: string } {
+	const hintLangs = ['typescript', 'javascript', 'python', 'html', 'json', 'css', 'sql', 'bash', 'yaml', 'go', 'rust', 'java', 'cpp', 'xml'];
+	try {
+		const result = hljs.highlightAuto(code, hintLangs);
+		let lang = result.language || 'plaintext';
+		if ((lang === 'javascript' || lang === 'typescript') && /import\s+React|<[A-Z][A-Za-z]+[\s/>]/.test(code)) {
+			lang = 'typescriptreact';
+		}
+		return { language: lang, html: result.value };
+	} catch (_) {
+		return { language: 'plaintext', html: code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') };
+	}
+}
+
+function isLikelyCode(text: string): boolean {
+	const lines = text.split('\n');
+	if (lines.length < 2) return false;
+	const codePatterns = [
+		/^\s{2,}/,
+		/[{}\[\]();]/,
+		/=>/,
+		/\bfunction\b|\bconst\b|\blet\b|\bvar\b|\bimport\b|\bexport\b|\bclass\b|\bdef\b|\breturn\b/,
+		/\/\/|\/\*|\*\/|#\s/,
+	];
+	const matchedLines = lines.filter(line => codePatterns.some(p => p.test(line)));
+	return matchedLines.length >= Math.max(2, lines.length * 0.3);
+}
 
 interface InputAreaProps {
 	onSendMessage: (text: string, model: string, attachments: Attachment[], pinnedFiles?: string[]) => void;
@@ -98,6 +132,26 @@ const CONTEXT_OPTIONS = [
 
 declare const vscode: any;
 
+const CodePalette: React.FC<{ cb: CodeBlock; onRemove: (id: number) => void }> = ({ cb, onRemove }) => {
+	const { language, html } = useMemo(() => detectAndHighlight(cb.code), [cb.code]);
+	return (
+		<div className="code-palette">
+			<div className="code-palette-header">
+				<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+					<rect x="2" y="3" width="12" height="1.5" rx="0.75" fill="currentColor" />
+					<rect x="2" y="7" width="12" height="1.5" rx="0.75" fill="currentColor" />
+					<rect x="2" y="11" width="8" height="1.5" rx="0.75" fill="currentColor" />
+				</svg>
+				<span className="code-palette-lang">{language}</span>
+				<button className="code-palette-close" onClick={() => onRemove(cb.id)} title="Remove">×</button>
+			</div>
+			<div className="code-palette-body">
+				<pre><code dangerouslySetInnerHTML={{ __html: html }} /></pre>
+			</div>
+		</div>
+	);
+};
+
 export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration, workspaceRoot: workspaceRootProp }) => {
 	const [text, setText] = useState(() => {
 		const state = vscode.getState();
@@ -111,6 +165,8 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		const state = vscode.getState();
 		return state?.attachedFiles || [];
 	});
+	const [codeBlocks, setCodeBlocks] = useState<CodeBlock[]>([]);
+	const codeBlockIdRef = useRef(0);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -244,7 +300,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	};
 
 	const handleSend = () => {
-		if (!text.trim() && attachedFiles.length === 0) return;
+		if (!text.trim() && attachedFiles.length === 0 && codeBlocks.length === 0) return;
 		
 		// Add selected mode as a skill if not already present in the text
 		let finalChatText = text;
@@ -255,10 +311,16 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			finalChatText = `${modeSkill}`;
 		}
 
+		if (codeBlocks.length > 0) {
+			const codeBlockText = codeBlocks.map(cb => `\`\`\`${detectAndHighlight(cb.code).language}\n${cb.code}\n\`\`\``).join('\n\n');
+			finalChatText = finalChatText ? `${finalChatText}\n\n${codeBlockText}` : codeBlockText;
+		}
+
 		const pinnedFiles = attachedFiles.filter(f => f.isPinned).map(f => f.path).filter(Boolean) as string[];
 		onSendMessage(finalChatText, currentModel, attachedFiles, pinnedFiles);
 		
 		setText('');
+		setCodeBlocks([]);
 		
 		// Keep only pinned files for the next message
 		const nextAttachedFiles = attachedFiles.filter(f => f.isPinned);
@@ -310,19 +372,27 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		reader.readAsDataURL(f);
 	}), []);
 
-	// Handle paste events — intercept clipboard images
+	// Handle paste events — intercept clipboard images and code blocks
 	const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
 		const items = Array.from(e.clipboardData?.items || []);
 		const imageItems = items.filter(item => item.type.startsWith('image/'));
-		if (imageItems.length === 0) return; // no images → let default text paste happen
+		if (imageItems.length > 0) {
+			e.preventDefault();
+			const files = imageItems.map(item => item.getAsFile()).filter(Boolean) as File[];
+			Promise.all(files.map(readImageFile)).then(newAttachments => {
+				const updatedFiles = [...attachedFiles, ...newAttachments];
+				setAttachedFiles(updatedFiles);
+				onFilesSelected(updatedFiles.map(f => f.name));
+			});
+			return;
+		}
 
-		e.preventDefault();
-		const files = imageItems.map(item => item.getAsFile()).filter(Boolean) as File[];
-		Promise.all(files.map(readImageFile)).then(newAttachments => {
-			const updatedFiles = [...attachedFiles, ...newAttachments];
-			setAttachedFiles(updatedFiles);
-			onFilesSelected(updatedFiles.map(f => f.name));
-		});
+		const pastedText = e.clipboardData?.getData('text') || '';
+		if (isLikelyCode(pastedText)) {
+			e.preventDefault();
+			const id = ++codeBlockIdRef.current;
+			setCodeBlocks(prev => [...prev, { id, code: pastedText }]);
+		}
 	}, [attachedFiles, onFilesSelected, readImageFile]);
 
 	// Drag-and-drop handlers
@@ -471,6 +541,17 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 									{file.type === 'terminal' && <div className="chip-tooltip">{file.path}</div>}
 								</span>
 							</Tag>
+						))}
+					</div>
+				)}
+				{codeBlocks.length > 0 && (
+					<div className="code-palettes">
+						{codeBlocks.map(cb => (
+							<CodePalette
+								key={cb.id}
+								cb={cb}
+								onRemove={(id) => setCodeBlocks(prev => prev.filter(b => b.id !== id))}
+							/>
 						))}
 					</div>
 				)}
@@ -623,7 +704,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 								Stop
 							</button>
 						) : (
-							<button className="send-btn" id="send-btn" onClick={handleSend} disabled={!text.trim() && attachedFiles.length === 0}>
+							<button className="send-btn" id="send-btn" onClick={handleSend} disabled={!text.trim() && attachedFiles.length === 0 && codeBlocks.length === 0}>
 								<svg width="13" height="13" viewBox="0 0 16 16" fill="none">
 									<path d="M8 13V3M8 3L4 7M8 3l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
 								</svg>
