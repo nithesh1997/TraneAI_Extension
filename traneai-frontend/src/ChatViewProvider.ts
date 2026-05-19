@@ -374,6 +374,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 						this._runQAResearchWorkflow(ticketMatch[1]);
 						return;
 					}
+					const imageAttachments = (data.attachments || []).filter((a: any) => a.type === 'image' && a.imageData);
+					if (imageAttachments.length > 0) {
+						this._extractTicketAndRunWorkflow(imageAttachments[0]);
+						return;
+					}
 				}
 
 				this._broadcastTyping(true);
@@ -1109,7 +1114,65 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
-	private _runQAResearchWorkflow(ticketId: string) {
+	private async _extractTicketAndRunWorkflow(imageAttachment: any) {
+		const extractingMsgId = `qa-extract-${Date.now()}`;
+		this._addMessage('ai', '🔬 **QA Research**\n\n- Extracting ticket information from screenshot...', [], extractingMsgId, false);
+
+		try {
+			const formData = new FormData();
+			formData.append('message', 'Extract the ticket/issue number (e.g. DS-399, JIRA-123, DS-170) from this screenshot. Also extract the ticket title, description, and any requirements or steps to reproduce. Return ONLY valid JSON in this exact format: { "ticketId": "...", "title": "...", "description": "...", "requirements": ["..."] }');
+			const imageBuffer = Buffer.from(imageAttachment.imageData, 'base64');
+			const blob = new Blob([imageBuffer], { type: imageAttachment.mimeType || 'image/jpeg' });
+			formData.append('images', blob, imageAttachment.name || 'ticket.png');
+
+			const response = await fetch('http://localhost:5000/api/chat/message', {
+				method: 'POST',
+				body: formData,
+			});
+
+			if (!response.ok) {
+				throw new Error('Backend vision request failed');
+			}
+
+			const responseData = await response.json();
+			const text = responseData.message || '';
+
+			let ticketId = '';
+			let ticketContext: { title?: string; description?: string; requirements?: string[] } = {};
+
+			const jsonMatch = text.match(/\{[\s\S]*\}/);
+			if (jsonMatch) {
+				try {
+					const parsed = JSON.parse(jsonMatch[0]);
+					ticketId = parsed.ticketId || '';
+					ticketContext = {
+						title: parsed.title,
+						description: parsed.description,
+						requirements: Array.isArray(parsed.requirements) ? parsed.requirements : [],
+					};
+				} catch {}
+			}
+
+			if (!ticketId) {
+				const fallbackMatch = text.match(/([A-Za-z]+-\d+)/);
+				if (fallbackMatch) {
+					ticketId = fallbackMatch[1];
+				}
+			}
+
+			if (!ticketId) {
+				this._updateMessageText(extractingMsgId, '🔬 **QA Research**\n\n- ❌ Could not detect ticket number from screenshot. Please type the ticket ID directly, e.g. `@research DS-399`.', false);
+				return;
+			}
+
+			this._updateMessageText(extractingMsgId, `🔬 **QA Research**\n\n- ✓ Detected ticket **${ticketId}** from screenshot`, false);
+			this._runQAResearchWorkflow(ticketId, ticketContext);
+		} catch (err: any) {
+			this._updateMessageText(extractingMsgId, `🔬 **QA Research**\n\n- ❌ Error extracting ticket: ${err.message}`, false);
+		}
+	}
+
+	private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: string; description?: string; requirements?: string[] }) {
 		const workspaceFolders = vscode.workspace.workspaceFolders;
 		if (!workspaceFolders) {
 			vscode.window.showErrorMessage('No workspace folder open.');
@@ -1118,7 +1181,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 		const rootPath = workspaceFolders[0].uri.fsPath;
 		const writeEmitter = new vscode.EventEmitter<string>();
-
+		
 		const log = (msg: string) => writeEmitter.fire(msg.replace(/\n/g, '\r\n'));
 		const statusMessageId = `qa-status-${ticketId}-${Date.now()}`;
 		const statusLines: string[] = [];
@@ -1267,6 +1330,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 									setTimeout(() => {
 										vscode.commands.executeCommand('trane-ai.openUrl', url);
 									}, 1500);
+									this._explainTicketRequirements(ticketId, ticketContext, url);
 								}
 							};
 
@@ -1370,6 +1434,60 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 		const terminal = vscode.window.createTerminal({ name: `TraneAI QA: ${ticketId}`, pty });
 		terminal.show();
+	}
+
+	private async _explainTicketRequirements(ticketId: string, ticketContext?: { title?: string; description?: string; requirements?: string[] }, appUrl?: string) {
+		const reqMsgId = `qa-req-${ticketId}-${Date.now()}`;
+		this._addMessage('ai', `🧪 **Testing Guide: ${ticketId}**\n\n- Analyzing ticket requirements...`, [], reqMsgId, true);
+
+		try {
+			const contextParts: string[] = [];
+			if (ticketContext?.title) {
+				contextParts.push(`Title: ${ticketContext.title}`);
+			}
+			if (ticketContext?.description) {
+				contextParts.push(`Description: ${ticketContext.description}`);
+			}
+			if (ticketContext?.requirements && ticketContext.requirements.length > 0) {
+				contextParts.push(`Requirements:\n${ticketContext.requirements.map(r => `- ${r}`).join('\n')}`);
+			}
+
+			const contextSection = contextParts.length > 0
+				? contextParts.join('\n\n')
+				: `Ticket ID: ${ticketId}`;
+
+			const prompt = `You are a QA engineer analyzing a bug/feature ticket.
+
+${contextSection}
+
+${appUrl ? `The application is running at: ${appUrl}` : ''}
+
+Based on the above ticket information, provide a concise QA testing guide that includes:
+1. **Ticket Summary** – Briefly describe what the issue or feature is about.
+2. **What to Test** – A clear list of test scenarios (happy path and edge cases).
+3. **Steps to Reproduce** (for bugs) or **Acceptance Criteria** (for features).
+4. **Areas to Verify** – Which parts of the app to check.
+
+Be specific and actionable. Format your response clearly using markdown.`;
+
+			const formData = new FormData();
+			formData.append('message', prompt);
+
+			const response = await fetch('http://localhost:5000/api/chat/message', {
+				method: 'POST',
+				body: formData,
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to generate testing guide');
+			}
+
+			const data = await response.json();
+			const guide = data.message || 'Could not generate testing guide.';
+			this._updateMessageText(reqMsgId, `🧪 **Testing Guide: ${ticketId}**\n\n${guide}`, false);
+		} catch (err: any) {
+			this._updateMessageText(reqMsgId, `🧪 **Testing Guide: ${ticketId}**\n\n- ❌ Could not generate testing guide: ${err.message}`, false);
+		}
 	}
 
 	private _runComprehensiveReview() {
