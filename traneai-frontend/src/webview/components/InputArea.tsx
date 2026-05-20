@@ -236,13 +236,17 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			setMentionQuery(query);
 			
 			if (query.length > 0) {
+				// Only filter if a dropdown is already open
 				if (showFolderDropdown) {
 					setFilteredFolders(workspaceFolders.filter(f => f.toLowerCase().includes(query.toLowerCase())).slice(0, 8));
-				} else {
+				} else if (showFileDropdown) {
 					setFilteredFiles(workspaceFiles.filter(f => f.toLowerCase().includes(query.toLowerCase())).slice(0, 8));
-					setShowFileDropdown(true);
+				} else {
+					// Neither dropdown is open - don't filter, keep context menu closed
+					setShowContextDropdown(false);
+					setShowFileDropdown(false);
+					setShowFolderDropdown(false);
 				}
-				setShowContextDropdown(false);
 			} else {
 				// Just "@" - reset to main context menu
 				setShowFileDropdown(false);
@@ -438,11 +442,15 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		if (id === 'files') {
 			setFilteredFiles(workspaceFiles.slice(0, 8));
 			setShowFileDropdown(true);
+			setShowFolderDropdown(false);
 			setShowContextDropdown(false);
+			setMentionQuery('');
 		} else if (id === 'folders') {
 			setFilteredFolders(workspaceFolders.slice(0, 8));
 			setShowFolderDropdown(true);
+			setShowFileDropdown(false);
 			setShowContextDropdown(false);
+			setMentionQuery('');
 		} else {
 			const newText = text.endsWith('@') ? text.slice(0, -1) : text;
 			setText(newText + '#' + id + ' ');

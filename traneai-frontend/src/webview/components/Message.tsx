@@ -434,6 +434,28 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 					<span className="msg-time">{isUser ? relativeTime : formatTime(message.timestamp)}</span>
 				</div>
 				<div className="msg-bubble">
+					{message.attachments && message.attachments.length > 0 && (
+						<div className="msg-attachments">
+							{message.attachments.map((attachment, idx) => (
+								<div key={idx} className={`msg-attachment ${attachment.type}`}>
+									{attachment.type === 'image' && attachment.imageData ? (
+										<img
+											className="msg-image"
+											src={`data:${attachment.mimeType || 'image/jpeg'};base64,${attachment.imageData}`}
+											alt={attachment.name}
+											title={attachment.name}
+											style={{height:"30px",width:'30px'}}
+										/>
+									) : (
+										<div className="msg-attachment-file">
+											<span className="attachment-icon">📎</span>
+											<span className="attachment-name">{attachment.name}</span>
+										</div>
+									)}
+								</div>
+							))}
+						</div>
+					)}
 					{parts.map((p, idx) => {
 						if (p.type === 'markdown') return <div key={idx} className="msg-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.content) }} />;
 						if (p.type === 'actionStep') return <ActionStepView key={idx} {...p} onOpenFile={onOpenFile} />;
