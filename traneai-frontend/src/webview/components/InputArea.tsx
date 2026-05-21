@@ -182,6 +182,9 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 
 	const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
 	const [workspaceFolders, setWorkspaceFolders] = useState<string[]>([]);
+	const [workspaceBranches, setWorkspaceBranches] = useState<string[]>([]);
+	const [selectedBranch, setSelectedBranch] = useState('');
+	const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
 	const [filteredFiles, setFilteredFiles] = useState<string[]>([]);
 	const [filteredFolders, setFilteredFolders] = useState<string[]>([]);
 	const [showFileDropdown, setShowFileDropdown] = useState(false);
@@ -212,6 +215,16 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 				if (foldersResponse.ok) {
 					const folders = await foldersResponse.json();
 					setWorkspaceFolders(folders);
+				}
+
+				// Fetch branches
+				const branchesResponse = await fetch(`http://localhost:5000/api/workspace/branches?root=${encodeURIComponent(workspaceRoot)}`);
+				if (branchesResponse.ok) {
+					const branches = await branchesResponse.json();
+					setWorkspaceBranches(branches);
+					if (branches.length > 0 && !selectedBranch) {
+						setSelectedBranch(branches[0]);
+					}
 				}
 			} catch (error) {
 				console.error('Failed to fetch workspace data:', error);
@@ -309,7 +322,19 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		// Add selected mode as a skill if not already present in the text
 		let finalChatText = text;
 		const modeSkill = `@${currentModel}`;
-		if (text.trim() && !text.includes(modeSkill) && currentModel !== 'auto') {
+		
+		// If QA mode and Research skill are active, and a branch is selected
+		if (currentModel === 'qa' && selectedSkill === 'research' && selectedBranch) {
+			const researchSkill = `@research`;
+			if (!text.includes(researchSkill)) {
+				finalChatText = `${modeSkill} ${researchSkill} Branch: ${selectedBranch} ${text}`;
+			} else if (!text.includes('Branch:')) {
+				finalChatText = text.replace(researchSkill, `${researchSkill} Branch: ${selectedBranch}`);
+				finalChatText = `${modeSkill} ${finalChatText}`;
+			} else {
+				finalChatText = `${modeSkill} ${text}`;
+			}
+		} else if (text.trim() && !text.includes(modeSkill) && currentModel !== 'auto') {
 			finalChatText = `${modeSkill} ${text}`;
 		} else if (!text.trim() && currentModel !== 'auto') {
 			finalChatText = `${modeSkill}`;
@@ -462,6 +487,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	const selectSkill = (skill: string) => {
 		const newText = (text ? text + ' ' : '') + '@' + skill + ' ';
 		setText(newText);
+		setSelectedSkill(skill);
 		setShowSkillsDropdown(false);
 		textareaRef.current?.focus();
 	};
@@ -475,6 +501,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			setAttachedFiles([]);
 			onFilesSelected([]);
 		}
+		setSelectedSkill(null); // Reset skill when model changes
 	}, [currentModel]);
 
 	useEffect(() => {
@@ -561,6 +588,30 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 								onRemove={(id) => setCodeBlocks(prev => prev.filter(b => b.id !== id))}
 							/>
 						))}
+					</div>
+				)}
+				{currentModel === 'qa' && (selectedSkill === 'research' || text.includes('@research')) && workspaceBranches.length > 0 && (
+					<div className="branch-selector-row" style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+						<span style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Branch</span>
+						<select 
+							value={selectedBranch} 
+							onChange={(e) => setSelectedBranch(e.target.value)}
+							style={{ 
+								background: 'var(--bg-secondary)', 
+								color: 'var(--text-primary)', 
+								border: '1px solid var(--border)', 
+								borderRadius: '4px', 
+								padding: '2px 8px', 
+								fontSize: '12px',
+								outline: 'none',
+								flex: 1,
+								maxWidth: '200px'
+							}}
+						>
+							{workspaceBranches.map(branch => (
+								<option key={branch} value={branch}>{branch}</option>
+							))}
+						</select>
 					</div>
 				)}
 				<textarea

@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export async function getWorkspaceFiles(req: Request, res: Response): Promise<void> {
     try {
@@ -73,5 +77,27 @@ export async function getWorkspaceFolders(req: Request, res: Response): Promise<
     } catch (error) {
         console.error('Workspace folders error:', error);
         res.status(500).json({ error: 'Failed to retrieve folders' });
+    }
+}
+
+export async function getWorkspaceBranches(req: Request, res: Response): Promise<void> {
+    try {
+        const root = req.query.root as string;
+        if (!root || !fs.existsSync(root)) {
+            res.status(400).json({ error: 'Valid workspace root is required' });
+            return;
+        }
+
+        const { stdout } = await execAsync('git branch -a', { cwd: root });
+        const branches = stdout
+            .split('\n')
+            .map(b => b.trim().replace(/^\*\s*/, '').replace(/^remotes\/origin\//, ''))
+            .filter(b => b && !b.includes('HEAD ->'))
+            .filter((value, index, self) => self.indexOf(value) === index); // Unique
+
+        res.json(branches);
+    } catch (error) {
+        console.error('Workspace branches error:', error);
+        res.status(500).json({ error: 'Failed to retrieve branches' });
     }
 }
