@@ -641,86 +641,89 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			const workspaceFolders = vscode.workspace.workspaceFolders;
 			if (!workspaceFolders || workspaceFolders.length === 0) {
 				this._broadcastTyping(false);
-				this._addMessage('ai', 'No workspace open');
+				this._addMessage('ai', '❌ No workspace open.');
 				return;
 			}
 			
-			const workspaceEdit = new vscode.WorkspaceEdit();
-			let failureReason = '';
+			// Group edits by URI to apply them sequentially per file
+			const editsByUri = new Map<string, { uri: vscode.Uri; proposals: EditProposal[] }>();
 			
 			for (const edit of edits) {
 				let uri: vscode.Uri | null = null;
-				
-				// 1. Try absolute path
 				if (edit.filePath.startsWith('/') || edit.filePath.match(/^[A-Za-z]:/)) {
-					if (fs.existsSync(edit.filePath)) {
-						uri = vscode.Uri.file(edit.filePath);
-					}
+					if (fs.existsSync(edit.filePath)) uri = vscode.Uri.file(edit.filePath);
 				}
-				
-				// 2. Try relative to all workspace folders
 				if (!uri) {
 					for (const folder of workspaceFolders) {
 						const potentialPath = path.join(folder.uri.fsPath, edit.filePath);
-						if (fs.existsSync(potentialPath)) {
-							uri = vscode.Uri.file(potentialPath);
-							break;
+						if (fs.existsSync(potentialPath)) { uri = vscode.Uri.file(potentialPath); break; }
+					}
+				}
+				if (!uri) uri = vscode.Uri.joinPath(workspaceFolders[0].uri, edit.filePath);
+				
+				const uriStr = uri.toString();
+				if (!editsByUri.has(uriStr)) {
+					editsByUri.set(uriStr, { uri, proposals: [] });
+				}
+				editsByUri.get(uriStr)!.proposals.push(edit);
+			}
+
+			let totalApplied = 0;
+			let errors: string[] = [];
+
+			for (const { uri, proposals } of editsByUri.values()) {
+				try {
+					let fileAppliedCount = 0;
+					
+					// Apply each proposal one by one, refreshing the document each time
+					// to handle potential overlaps or shifting offsets.
+					for (const prop of proposals) {
+						const doc = await vscode.workspace.openTextDocument(uri);
+						const currentContent = doc.getText();
+						
+						const startIndex = currentContent.indexOf(prop.oldContent);
+						if (startIndex === -1) {
+							errors.push(`Could not find exact text in ${prop.filePath}. It might have been changed by a previous edit.`);
+							continue;
+						}
+						
+						const workspaceEdit = new vscode.WorkspaceEdit();
+						const range = new vscode.Range(
+							doc.positionAt(startIndex), 
+							doc.positionAt(startIndex + prop.oldContent.length)
+						);
+						workspaceEdit.replace(uri, range, prop.newContent);
+						
+						const success = await vscode.workspace.applyEdit(workspaceEdit);
+						if (success) {
+							fileAppliedCount++;
+							totalApplied++;
+						} else {
+							errors.push(`VS Code rejected an edit for ${prop.filePath}.`);
 						}
 					}
-				}
-				
-				// 3. Fallback to first folder if still not found
-				if (!uri) {
-					uri = vscode.Uri.joinPath(workspaceFolders[0].uri, edit.filePath);
-				}
-				
-				try {
-					const doc = await vscode.workspace.openTextDocument(uri);
-					const content = doc.getText();
-					const startIndex = content.indexOf(edit.oldContent);
-					
-					if (startIndex === -1) {
-						failureReason = `Could not find exact text in ${edit.filePath}`;
-						break;
+
+					if (fileAppliedCount > 0) {
+						const finalDoc = await vscode.workspace.openTextDocument(uri);
+						await finalDoc.save();
 					}
-					
-					const endIndex = startIndex + edit.oldContent.length;
-					workspaceEdit.replace(uri, new vscode.Range(doc.positionAt(startIndex), doc.positionAt(endIndex)), edit.newContent);
-				} catch (err) {
-					failureReason = `Could not open file ${edit.filePath}. Ensure it exists in the workspace.`;
-					break;
+				} catch (err: any) {
+					errors.push(`Failed to process ${uri.fsPath}: ${err.message}`);
 				}
 			}
-			
-			if (failureReason) {
-				this._broadcastTyping(false);
-				this._addMessage('ai', `❌ Failed to apply edits: ${failureReason}`);
-				return;
-			}
-			
-			const applied = await vscode.workspace.applyEdit(workspaceEdit);
+
 			this._broadcastTyping(false);
 			
-			if (applied) {
-				// Save all affected docs
-				for (const edit of edits) {
-					let uri: vscode.Uri;
-					if (edit.filePath.startsWith('/') || edit.filePath.match(/^[A-Za-z]:/)) {
-						uri = vscode.Uri.file(edit.filePath);
-					} else {
-						uri = vscode.Uri.joinPath(workspaceFolders[0].uri, edit.filePath);
-					}
-					const doc = await vscode.workspace.openTextDocument(uri);
-					await doc.save();
-				}
-				
-				this._addMessage('ai', `✅ Successfully applied changes to ${edits.length} file(s). [Checkpoint: ${checkpointId}]`);
+			if (errors.length > 0 && totalApplied === 0) {
+				this._addMessage('ai', `❌ Failed to apply edits:\n${errors.join('\n')}`);
+			} else if (errors.length > 0) {
+				this._addMessage('ai', `⚠️ Partially applied ${totalApplied} change(s), but encountered some issues:\n${errors.join('\n')}\n\n[Checkpoint: ${checkpointId}]`);
 			} else {
-				this._addMessage('ai', '❌ Failed to apply workspace edits.');
+				this._addMessage('ai', `✅ Successfully applied all ${totalApplied} change(s). [Checkpoint: ${checkpointId}]`);
 			}
 		} catch (error: any) {
 			this._broadcastTyping(false);
-			this._addMessage('ai', `Error: ${error.message}`);
+			this._addMessage('ai', `❌ Error: ${error.message}`);
 		}
 	}
 
