@@ -26,16 +26,17 @@ ${indexSummary || 'No workspace index available.'}
 
 ## Instruction for Edits
 - NEVER explain code before editing.
-- GENERATE [EDIT_PROPOSAL] immediately if you have enough information.
+- GENERATE an edit proposal immediately using tools if you have enough information.
 - If you need more context, use read_file or list_files first.
 - ALWAYS use multi_file_edit for changes spanning multiple files.
 - Preserve all existing formatting, indentation, and comments.
+
 ## Methodical Engineering Workflow
 1. **Plan**: For any task more complex than a simple greeting, start with a [PLAN] block.
 2. **Explore**: Use list_files and read_file to verify context. NEVER guess the content of a file.
-3. **Propose**: Generate [EDIT_PROPOSAL] or [COMMAND_PROPOSAL] tags. 
-   - NOTE: Your tools no longer modify files directly. They return proposals that the user must click "Accept" or "Run" to execute. 
-   - ALWAYS explain what the proposal does after generating the tags.
+3. **Propose**: Use the appropriate tool (edit_file, create_file, etc.) to propose changes. 
+   - Your tools will automatically generate proposals that the user must click "Accept" to execute. 
+   - ALWAYS explain what the changes do after the tools have run.
 
 ## Identity & Professionalism
 - You provide accurate, practical, and production-ready code.
@@ -73,39 +74,6 @@ ${indexSummary || 'No workspace index available.'}
 - Preserves all other code, formatting, and whitespace
 - Always use this for: renaming, small changes, single function edits
 
-## Edit Proposal Format (IMPORTANT)
-
-When you want to make changes to a file, do NOT use edit_file directly. Instead, output an edit proposal in this format:
-
-\`\`\`
-[EDIT_PROPOSAL]
-file: relative/path/to/file.ts
-old: |
-  exact text to replace
-  (must match exactly)
-new: |
-  replacement text
-[END_EDIT]
-\`\`\`
-
-The frontend will show you a diff preview and let you apply or reject the changes.
-
-Example:
-\`\`\`
-[EDIT_PROPOSAL]
-file: src/app.component.ts
-old: |
-  export class AppComponent implements OnInit {
-new: |
-  export class HelloComponent implements OnInit {
-[END_EDIT]
-\`\`\`
-
-This gives you:
-1. A preview of exactly what will change
-2. Confirmation before changes are applied
-3. Ability to reject and try a different approach
-
 ### analyze_code
 - Analyzes code structure and logic
 - Returns: classes, functions, imports, exports, code preview
@@ -117,7 +85,6 @@ This gives you:
 - Returns actual command output
 
 ## Critical Rules
-
 1. **ALWAYS read a file before modifying it** - Use read_file first
 2. **ALWAYS explore the workspace** - Use list_files to understand structure  
 3. **Use analyze_code** to understand code logic before explaining
@@ -260,16 +227,10 @@ export async function generateAIResponse(
   while (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
     messages.push(responseMessage);
 
-    let editToolUsed = false;
-
     for (const toolCall of responseMessage.tool_calls) {
       if (toolCall.type !== 'function') continue;
       
       const functionName = toolCall.function.name;
-      if (functionName === 'edit_file' || functionName === 'write_file' || functionName === 'create_file' || functionName === 'multi_file_edit') {
-        editToolUsed = true;
-      }
-      
       const functionArgs = JSON.parse(toolCall.function.arguments);
       let functionResponse = '';
 
@@ -350,8 +311,8 @@ export async function generateAIResponse(
 
   let finalContent = responseMessage.content || '';
 
-  // Safety layer: Forcefully ensure every tool-generated proposal is present in the final message.
-  // We check for the unique [EDIT_PROPOSAL] header for each specific tool result.
+  // Safety layer: ONLY append proposals if they are absolutely missing from the final message.
+  // This prevents duplication if the AI already included them.
   if (allProposals.length > 0) {
     let proposalBlock = '';
     for (const proposal of allProposals) {
@@ -398,15 +359,12 @@ export async function generateVisionResponse(
     model: process.env.AZURE_OPENAI_DEPLOYMENT!,
     messages: [
       {
-        role: "user",
-        content: [
-          { type: "text", text: message },
-          ...imageContent,
-        ],
+        role: 'system',
+        content: 'You are TraneAI, a professional software engineer. Analyze the provided images and provide direct, helpful technical guidance.',
       },
+      { role: 'user', content: [{ type: 'text', text: message }, ...imageContent] as any }
     ],
-    max_tokens: 1500,
   });
 
-  return response.choices[0]?.message?.content || 'No vision response';
+  return response.choices[0].message.content || '';
 }
