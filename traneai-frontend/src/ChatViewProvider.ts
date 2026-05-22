@@ -11,6 +11,7 @@ import * as codeAnalysis from './services/codeAnalysis';
 import * as editConfirmation from './services/editConfirmation';
 import { CheckpointManager } from './services/checkpointManager';
 import { EditProposal } from './webview/components/Message';
+import { execSync } from 'child_process';
 
 interface SessionMessage {
 	role: string;
@@ -1241,7 +1242,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: string; description?: string; requirements?: string[] }) {
+private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: string; description?: string; requirements?: string[] }) {
 	const workspaceFolders = vscode.workspace.workspaceFolders;
 	if (!workspaceFolders) {
 		vscode.window.showErrorMessage('No workspace folder open.');
@@ -1258,32 +1259,118 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		statusLines.push(`- ${text}`);
 		this._updateMessageText(statusMessageId, `🔬 **QA Research: ${ticketId}**\n\n${statusLines.join('\n')}`, false);
 	};
-	const managedProcesses = new Set<ChildProcess>();
 	let workflowClosed = false;
 	let detectedUrl: string | null = null;
 	let fallbackTimeout: NodeJS.Timeout | undefined;
+	let mainProcessPid: number | null = null;
 	
-	const registerProcess = (proc: ChildProcess) => {
-		managedProcesses.add(proc);
-		proc.on('exit', () => managedProcesses.delete(proc));
-		proc.on('error', () => managedProcesses.delete(proc));
-		return proc;
+	// Function to find all child processes of a given PID
+	const findChildProcesses = (parentPid: number): number[] => {
+		const children: number[] = [];
+		try {
+			if (process.platform === 'win32') {
+				// Windows - use wmic
+				const result = execSync(`wmic process where "ParentProcessId=${parentPid}" get ProcessId`, { encoding: 'utf8' });
+				const lines = result.split('\n');
+				for (const line of lines) {
+					const pid = parseInt(line.trim());
+					if (!isNaN(pid) && pid !== parentPid) {
+						children.push(pid);
+					}
+				}
+			} else {
+				// Linux/Mac - use ps command
+				const result = execSync(`ps -o pid --no-headers --ppid ${parentPid}`, { encoding: 'utf8' });
+				const lines = result.split('\n');
+				for (const line of lines) {
+					const pid = parseInt(line.trim());
+					if (!isNaN(pid) && pid !== parentPid) {
+						children.push(pid);
+						// Recursively find grandchildren
+						children.push(...findChildProcesses(pid));
+					}
+				}
+			}
+		} catch (error) {
+			// Ignore errors - process might already be dead
+		}
+		return children;
 	};
 	
-	const openUrlInBrowser = (url: string) => {
-		if (!url || workflowClosed) return;
-		
-		// Clear any pending fallback timeout
-		if (fallbackTimeout) {
-			clearTimeout(fallbackTimeout);
-			fallbackTimeout = undefined;
+	// Function to kill a process and all its children
+	const killProcessTree = (pid: number) => {
+		try {
+			if (process.platform === 'win32') {
+				// Windows: Use taskkill to kill process tree
+				exec(`taskkill /PID ${pid} /T /F`);
+			} else {
+				// Linux/Mac: First find all child processes
+				const childPids = findChildProcesses(pid);
+				const allPids = [pid, ...childPids];
+				
+				log(`\x1b[33m  Found ${allPids.length} process(es) to kill: ${allPids.join(', ')}\x1b[0m\r\n`);
+				
+				// Kill all processes in reverse order (children first)
+				for (const childPid of [...childPids].reverse()) {
+					try {
+						process.kill(childPid, 'SIGTERM');
+						log(`\x1b[32m  → Killed child process ${childPid}\x1b[0m\r\n`);
+					} catch (e) {
+						// Process might already be dead
+					}
+				}
+				
+				// Kill the main process
+				try {
+					process.kill(pid, 'SIGTERM');
+					log(`\x1b[32m  → Killed main process ${pid}\x1b[0m\r\n`);
+				} catch (e) {
+					// Process might already be dead
+				}
+				
+				// Force kill any remaining processes after 2 seconds
+				setTimeout(() => {
+					for (const childPid of allPids) {
+						try {
+							process.kill(childPid, 'SIGKILL');
+						} catch (e) {
+							// Process already dead
+						}
+					}
+				}, 2000);
+			}
+		} catch (error) {
+			console.error(`Failed to kill process tree for ${pid}:`, error);
 		}
-		
-		log(`\r\n\x1b[32m  ✓ Opening URL in VS Code browser: ${url}\x1b[0m\r\n`);
-		pushStatus(`App detected at **${url}**. Opening in VS Code browser now.`);
-		
-		// Use VS Code's built-in browser command
-		vscode.commands.executeCommand('simpleBrowser.api.open', url);
+	};
+	
+	// Kill processes by port (more reliable)
+	const killProcessByPort = (port: number) => {
+		try {
+			if (process.platform === 'win32') {
+				const result = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, { encoding: 'utf8' });
+				const lines = result.split('\n');
+				const pids = new Set<number>();
+				for (const line of lines) {
+					const match = line.match(/\s+(\d+)\s*$/);
+					if (match) {
+						pids.add(parseInt(match[1]));
+					}
+				}
+				for (const pid of pids) {
+					exec(`taskkill /PID ${pid} /F`);
+				}
+			} else {
+				// Linux/Mac - use lsof to find process using port
+				const result = execSync(`lsof -ti :${port}`, { encoding: 'utf8' });
+				const pids = result.split('\n').filter(pid => pid.trim()).map(pid => parseInt(pid.trim()));
+				for (const pid of pids) {
+					killProcessTree(pid);
+				}
+			}
+		} catch (error) {
+			// No process found on port or error
+		}
 	};
 	
 	const cleanupProcesses = (reason: string) => {
@@ -1292,31 +1379,55 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		}
 		workflowClosed = true;
 		pushStatus(reason);
-		for (const proc of managedProcesses) {
-			const pid = proc.pid;
-			if (!pid) {
-				continue;
-			}
-			if (process.platform === 'win32') {
-				exec(`taskkill /PID ${pid} /T /F`);
-			} else {
-				try {
-					proc.kill('SIGTERM');
-				} catch {
-				}
-			}
+		
+		log(`\x1b[33m⏹️ Stopping workflow and killing all processes...\x1b[0m\r\n`);
+		
+		// Kill by PID if we have it
+		if (mainProcessPid) {
+			log(`\x1b[33m  Killing process tree for PID ${mainProcessPid}...\x1b[0m\r\n`);
+			killProcessTree(mainProcessPid);
 		}
-		managedProcesses.clear();
-		process.removeListener('exit', onExtensionHostExit);
+		
+		// Also kill any process on port 3000 to be thorough
+		log(`\x1b[33m  Checking for processes on port 3000...\x1b[0m\r\n`);
+		killProcessByPort(3000);
+		
+		// Clear timeout
+		if (fallbackTimeout) {
+			clearTimeout(fallbackTimeout);
+			fallbackTimeout = undefined;
+		}
+		
+		setTimeout(() => {
+			log(`\x1b[32m✓ All processes terminated\x1b[0m\r\n`);
+			pushStatus('All processes terminated successfully.');
+		}, 1000);
 	};
 	
-	const onExtensionHostExit = () => cleanupProcesses('Workflow stopped: Extension host is shutting down.');
-	process.once('exit', onExtensionHostExit);
+	const openUrlInBrowser = (url: string) => {
+		if (!url || workflowClosed) return;
+		
+		if (fallbackTimeout) {
+			clearTimeout(fallbackTimeout);
+			fallbackTimeout = undefined;
+		}
+		
+		log(`\r\n\x1b[32m  ✓ Opening URL in VS Code browser: ${url}\x1b[0m\r\n`);
+		pushStatus(`App detected at **${url}**. Opening in VS Code browser now.`);
+		
+		setTimeout(() => {
+			if (!workflowClosed) {
+				vscode.commands.executeCommand('simpleBrowser.api.open', url).catch(() => {
+					vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url));
+				});
+			}
+		}, 500);
+	};
 
 	const pty: vscode.Pseudoterminal = {
 		onDidWrite: writeEmitter.event,
 		handleInput: (data: string) => {
-			if (data === '\x03') {
+			if (data === '\x03') { // Ctrl+C
 				log(`\r\n\x1b[31m^C\x1b[0m\r\n`);
 				cleanupProcesses('Workflow stopped by user (Ctrl+C).');
 			}
@@ -1325,6 +1436,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			log(`\x1b[34m╔══════════════════════════════════════════╗\x1b[0m\r\n`);
 			log(`\x1b[34m║  TraneAI QA Research: ${ticketId.padEnd(19)}║\x1b[0m\r\n`);
 			log(`\x1b[34m╚══════════════════════════════════════════╝\x1b[0m\r\n\r\n`);
+			log(`\x1b[33m⚠️  Press Ctrl+C to stop the workflow and kill all processes ⚠️\x1b[0m\r\n\r\n`);
 
 			pushStatus('Step 1/5: Analyzing project structure...');
 			log(`\x1b[33m[Step 1/5] Analyzing project structure...\x1b[0m\r\n`);
@@ -1334,10 +1446,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			try {
 				packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
 				log(`\x1b[32m  ✓ Project : ${packageJson.name || 'Unknown'} (v${packageJson.version || '?'})\x1b[0m\r\n`);
-				const scriptNames = Object.keys(packageJson.scripts || {});
-				if (scriptNames.length > 0) {
-					log(`\x1b[32m  ✓ Scripts : ${scriptNames.join(', ')}\x1b[0m\r\n`);
-				}
 				pushStatus(`Step 1/5 complete: Project **${packageJson.name || 'Unknown'}** detected.`);
 			} catch {
 				log(`\x1b[33m  ⚠ Could not read package.json\x1b[0m\r\n`);
@@ -1347,7 +1455,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			pushStatus('Step 2/5: Checking git status...');
 			log(`\r\n\x1b[33m[Step 2/5] Checking git status...\x1b[0m\r\n`);
 
-			const gitStatus = registerProcess(exec('git status --short', { cwd: rootPath }));
+			const gitStatus = exec('git status --short', { cwd: rootPath });
 			let gitStatusOutput = '';
 			gitStatus.stdout?.on('data', (d) => {
 				const text = d.toString();
@@ -1357,9 +1465,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			gitStatus.stderr?.on('data', (d) => log(`\x1b[31m  ${d.toString()}\x1b[0m`));
 
 			gitStatus.on('exit', () => {
-				if (workflowClosed) {
-					return;
-				}
+				if (workflowClosed) return;
+				
 				const changedCount = gitStatusOutput.split('\n').map(line => line.trim()).filter(Boolean).length;
 				pushStatus(changedCount > 0
 					? `Step 2/5 complete: Git status found **${changedCount}** changed entries.`
@@ -1368,15 +1475,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				pushStatus(`Step 3/5: Searching for branch matching **${ticketId}**...`);
 				log(`\r\n\x1b[33m[Step 3/5] Searching for branch: ${ticketId}...\x1b[0m\r\n`);
 
-				const gitBranch = registerProcess(exec('git branch -a', { cwd: rootPath }));
+				const gitBranch = exec('git branch -a', { cwd: rootPath });
 				let branchOutput = '';
 				gitBranch.stdout?.on('data', (d) => { branchOutput += d.toString(); });
 				gitBranch.stderr?.on('data', (d) => log(`\x1b[31m  ${d.toString()}\x1b[0m`));
 
 				gitBranch.on('exit', () => {
-					if (workflowClosed) {
-						return;
-					}
+					if (workflowClosed) return;
+					
 					const allBranches = branchOutput
 						.split('\n')
 						.map(b => b.trim().replace(/^\*\s*/, ''))
@@ -1399,9 +1505,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 							: 'npm start';
 
 						log(`\x1b[32m  → Running: ${startCmd}\x1b[0m\r\n`);
+						log(`\x1b[33m  → Process will be tracked for cleanup on Ctrl+C\x1b[0m\r\n`);
 						pushStatus(`Step 5/5 in progress: Running \`${startCmd}\`.`);
 
-						const startProc = registerProcess(exec(startCmd, { cwd: rootPath }));
+						// Spawn the process with a shell
+						const startProc = exec(startCmd, { cwd: rootPath });
+						
+						// Store the main process PID
+						if (startProc.pid) {
+							mainProcessPid = startProc.pid;
+							log(`\x1b[32m  → Main process PID: ${mainProcessPid}\x1b[0m\r\n`);
+							
+							// On Linux/Mac, also try to find the Node.js child process
+							if (process.platform !== 'win32') {
+								setTimeout(() => {
+									try {
+										// Find the actual node process spawned by npm
+										const psResult = execSync(`pgrep -P ${mainProcessPid}`, { encoding: 'utf8' });
+										const childPids = psResult.split('\n').filter(pid => pid.trim()).map(pid => parseInt(pid.trim()));
+										if (childPids.length > 0) {
+											log(`\x1b[32m  → Found child Node.js processes: ${childPids.join(', ')}\x1b[0m\r\n`);
+											// Store the main Node.js process PID for better cleanup
+											mainProcessPid = childPids[0];
+										}
+									} catch (e) {
+										// No child processes found yet
+									}
+								}, 1000);
+							}
+						}
+						
 						let hasOpenedUrl = false;
 						let outputBuffer = '';
 						
@@ -1422,7 +1555,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 									url = `http://${url}`;
 								}
 								
-								// Convert 0.0.0.0 to localhost for better compatibility
 								if (url.includes('0.0.0.0')) {
 									const portMatch = url.match(/:(\d+)/);
 									if (portMatch) {
@@ -1432,17 +1564,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 								
 								detectedUrl = url;
 								
-								// Set a fallback timeout to open URL if success message isn't detected
 								if (!fallbackTimeout) {
 									fallbackTimeout = setTimeout(() => {
 										if (detectedUrl && !hasOpenedUrl && !workflowClosed) {
 											hasOpenedUrl = true;
 											openUrlInBrowser(detectedUrl);
 										}
-									}, 5000); // 5 second fallback
+									}, 5000);
 								}
 
-								// Check if the app is ready
 								const isReady = clean.toLowerCase().includes('compiled successfully') || 
 											   clean.toLowerCase().includes('ready in') ||
 											   clean.toLowerCase().includes('started successfully') ||
@@ -1499,14 +1629,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 						log(`\x1b[32m  → Running: ${installCmd}\x1b[0m\r\n`);
 						pushStatus(`Step 4/5 in progress: Found **${missingDeps.length}** missing dependencies. Running \`${installCmd}\`.`);
 
-						const installProc = registerProcess(exec(installCmd, { cwd: rootPath }));
+						const installProc = exec(installCmd, { cwd: rootPath });
 						installProc.stdout?.on('data', (d) => log(d.toString()));
 						installProc.stderr?.on('data', (d) => log(d.toString()));
 
 						installProc.on('exit', (code) => {
-							if (workflowClosed) {
-								return;
-							}
+							if (workflowClosed) return;
+							
 							if (code !== 0) {
 								log(`\r\n\x1b[31m  ✗ Installation failed (exit code ${code})\x1b[0m\r\n`);
 								pushStatus(`Step 4/5 failed: Dependency installation failed (exit code ${code}).`);
@@ -1524,14 +1653,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 						log(`\x1b[32m  → Checking out: ${cleanBranch}...\x1b[0m\r\n`);
 						pushStatus(`Step 3/5: Found branch **${cleanBranch}**. Checking out...`);
 
-						const gitCheckout = registerProcess(exec(`git checkout ${cleanBranch}`, { cwd: rootPath }));
+						const gitCheckout = exec(`git checkout ${cleanBranch}`, { cwd: rootPath });
 						gitCheckout.stdout?.on('data', (d) => log(d.toString()));
 						gitCheckout.stderr?.on('data', (d) => log(d.toString()));
 
 						gitCheckout.on('exit', (code) => {
-							if (workflowClosed) {
-								return;
-							}
+							if (workflowClosed) return;
+							
 							if (code === 0) {
 								log(`\x1b[32m  ✓ Checked out ${cleanBranch}\x1b[0m\r\n`);
 								pushStatus(`Step 3/5 complete: Checked out branch **${cleanBranch}**.`);
@@ -1550,7 +1678,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			});
 		},
 		close: () => {
-			cleanupProcesses('Workflow stopped: Terminal was closed. Background processes were terminated.');
+			cleanupProcesses('Workflow stopped: Terminal was closed.');
 		}
 	};
 
@@ -1559,6 +1687,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	const terminal = vscode.window.createTerminal({ name: `TraneAI QA: ${ticketId}`, pty });
 	terminal.show();
 }
+
+// Add this import at the top of the file
 
 	private async _explainTicketRequirements(ticketId: string, ticketContext?: { title?: string; description?: string; requirements?: string[] }, appUrl?: string) {
 		const reqMsgId = `qa-req-${ticketId}-${Date.now()}`;
@@ -1629,18 +1759,27 @@ Be specific and actionable. Format your response clearly using markdown.`;
 	let fallbackTimeout: NodeJS.Timeout | undefined;
 
 	const openUrlInBrowser = (url: string) => {
-		if (!url || reviewClosed) return;
-		
-		if (fallbackTimeout) {
-			clearTimeout(fallbackTimeout);
-			fallbackTimeout = undefined;
-		}
-		
-		writeEmitter.fire(`\r\n\x1b[32m  ✓ Opening URL in VS Code browser: ${url}\x1b[0m\r\n`);
-		
-		// Use VS Code's built-in browser command
-		vscode.commands.executeCommand('simpleBrowser.api.open', url);
+	if (!url || reviewClosed) return;
+	
+	if (fallbackTimeout) {
+		clearTimeout(fallbackTimeout);
+		fallbackTimeout = undefined;
+	}
+	
+	writeEmitter.fire(`\r\n\x1b[32m  ✓ Opening URL in VS Code browser: ${url}\x1b[0m\r\n`);
+	
+	// Use VS Code's preview HTML to force open in VS Code only
+	const openInVSCodeBrowser = () => {
+		// Method 1: Use simple browser API
+		vscode.commands.executeCommand('simpleBrowser.api.open', url).catch(() => {
+			// Method 2: Fallback to opening in VS Code's built-in preview
+			vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url));
+		});
 	};
+	
+	// Small delay to ensure terminal output is visible
+	setTimeout(openInVSCodeBrowser, 500);
+};
 
 	const killReviewProcesses = () => {
 		if (reviewClosed) return;
