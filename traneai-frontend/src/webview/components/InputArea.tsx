@@ -184,6 +184,8 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	const [workspaceFolders, setWorkspaceFolders] = useState<string[]>([]);
 	const [workspaceBranches, setWorkspaceBranches] = useState<string[]>([]);
 	const [selectedBranch, setSelectedBranch] = useState('');
+	const [branchSearch, setBranchSearch] = useState('');
+	const [showBranchDropdown, setShowBranchDropdown] = useState(false);
 	const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
 	const [filteredFiles, setFilteredFiles] = useState<string[]>([]);
 	const [filteredFolders, setFilteredFolders] = useState<string[]>([]);
@@ -222,9 +224,6 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 				if (branchesResponse.ok) {
 					const branches = await branchesResponse.json();
 					setWorkspaceBranches(branches);
-					if (branches.length > 0 && !selectedBranch) {
-						setSelectedBranch(branches[0]);
-					}
 				}
 			} catch (error) {
 				console.error('Failed to fetch workspace data:', error);
@@ -319,12 +318,17 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	const handleSend = () => {
 		if (!text.trim() && attachedFiles.length === 0 && codeBlocks.length === 0) return;
 		
+		// Check for ticket number or images to prioritize them over the branch selector
+		const hasTicketNumber = /[A-Z]+-\d+/.test(text);
+		const hasImages = attachedFiles.some(f => f.type === 'image');
+		const prioritizeInput = hasTicketNumber || hasImages;
+
 		// Add selected mode as a skill if not already present in the text
 		let finalChatText = text;
 		const modeSkill = `@${currentModel}`;
 		
 		// If QA mode and Research skill are active, and a branch is selected
-		if (currentModel === 'qa' && selectedSkill === 'research' && selectedBranch) {
+		if (currentModel === 'qa' && selectedSkill === 'research' && selectedBranch && !prioritizeInput) {
 			const researchSkill = `@research`;
 			if (!text.includes(researchSkill)) {
 				finalChatText = `${modeSkill} ${researchSkill} Branch: ${selectedBranch} ${text}`;
@@ -510,6 +514,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			if (!target.closest('.model-selector')) setShowModelDropdown(false);
 			if (!target.closest('.skills-selector')) setShowSkillsDropdown(false);
 			if (!target.closest('.attachment-selector')) setShowAttachmentDropdown(false);
+			if (!target.closest('.branch-selector-custom')) setShowBranchDropdown(false);
 			if (!target.closest('.context-dropdown')) {
 				setShowContextDropdown(false);
 				setShowFileDropdown(false);
@@ -591,27 +596,122 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 					</div>
 				)}
 				{currentModel === 'qa' && (selectedSkill === 'research' || text.includes('@research')) && workspaceBranches.length > 0 && (
-					<div className="branch-selector-row" style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+					<div className="branch-selector-row" style={{ padding: '4px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
 						<span style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Branch</span>
-						<select 
-							value={selectedBranch} 
-							onChange={(e) => setSelectedBranch(e.target.value)}
-							style={{ 
-								background: 'var(--bg-secondary)', 
-								color: 'var(--text-primary)', 
-								border: '1px solid var(--border)', 
-								borderRadius: '4px', 
-								padding: '2px 8px', 
-								fontSize: '12px',
-								outline: 'none',
-								flex: 1,
-								maxWidth: '200px'
-							}}
-						>
-							{workspaceBranches.map(branch => (
-								<option key={branch} value={branch}>{branch}</option>
-							))}
-						</select>
+						<div className="branch-selector-custom" style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
+							<div 
+								className="branch-trigger" 
+								onClick={() => setShowBranchDropdown(!showBranchDropdown)}
+								style={{
+									background: 'var(--bg-secondary)', 
+									color: 'var(--text-primary)', 
+									border: '1px solid var(--border)', 
+									borderRadius: '4px', 
+									padding: '2px 8px', 
+									fontSize: '12px',
+									cursor: 'pointer',
+									display: 'flex',
+									justifyContent: 'space-between',
+									alignItems: 'center'
+								}}
+							>
+								<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+									{selectedBranch || 'Select branch'}
+								</span>
+								<div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+									{selectedBranch && (
+										<span 
+											onClick={(e) => { e.stopPropagation(); setSelectedBranch(''); }}
+											style={{ 
+												display: 'flex', 
+												alignItems: 'center', 
+												justifyContent: 'center',
+												width: '16px',
+												height: '16px',
+												borderRadius: '50%',
+												fontSize: '14px',
+												lineHeight: '1',
+												color: 'var(--text-secondary)'
+											}}
+											className="clear-branch-btn"
+											title="Clear selection"
+										>
+											×
+										</span>
+									)}
+									<svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+										<path d="M3 6l5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+									</svg>
+								</div>
+							</div>
+							
+							{showBranchDropdown && (
+								<div 
+									className="branch-dropdown"
+									style={{
+										position: 'absolute',
+										bottom: '100%',
+										left: 0,
+										width: '100%',
+										background: 'var(--bg-secondary)',
+										border: '1px solid var(--border)',
+										borderRadius: '4px',
+										boxShadow: '0 -4px 12px rgba(0,0,0,0.2)',
+										zIndex: 1000,
+										marginBottom: '4px',
+										display: 'flex',
+										flexDirection: 'column'
+									}}
+								>
+									<div style={{ padding: '4px', borderBottom: '1px solid var(--border)' }}>
+										<input 
+											type="text"
+											placeholder="Search branches..."
+											value={branchSearch}
+											onChange={(e) => setBranchSearch(e.target.value)}
+											autoFocus
+											style={{
+												width: '100%',
+												background: 'var(--bg-primary)',
+												border: '1px solid var(--border)',
+												borderRadius: '2px',
+												padding: '4px 8px',
+												fontSize: '12px',
+												color: 'var(--text-primary)',
+												outline: 'none'
+											}}
+										/>
+									</div>
+									<div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+										<div 
+											className="branch-item"
+											onClick={() => { setSelectedBranch(''); setShowBranchDropdown(false); setBranchSearch(''); }}
+											style={{ padding: '4px 8px', fontSize: '12px', cursor: 'pointer' }}
+										>
+											None
+										</div>
+										{workspaceBranches
+											.filter(b => b.toLowerCase().includes(branchSearch.toLowerCase()))
+											.map(branch => (
+												<div 
+													key={branch}
+													className={`branch-item ${selectedBranch === branch ? 'selected' : ''}`}
+													onClick={() => { setSelectedBranch(branch); setShowBranchDropdown(false); setBranchSearch(''); }}
+													style={{ 
+														padding: '4px 8px', 
+														fontSize: '12px', 
+														cursor: 'pointer',
+														background: selectedBranch === branch ? 'var(--bg-active)' : 'transparent'
+													}}
+												>
+													{branch}
+												</div>
+											))
+										}
+									</div>
+								</div>
+							)}
+						</div>
 					</div>
 				)}
 				<textarea
