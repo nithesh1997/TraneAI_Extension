@@ -180,7 +180,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		this._messages = [];
 	}
 
-	private _saveCurrentSession(): void {
+	private _saveCurrentSession(forceUpdateTimestamp: boolean = true): void {
 		if (!this._currentSessionId || this._messages.length === 0) {
 			return;
 		}
@@ -195,17 +195,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		const oldSessionFile = path.join(sessionsDir, `${this._currentSessionId}.json`);
 		
 		let createdAt = Date.now();
+		let updatedAt = Date.now();
+		let existingSession: ChatSession | undefined;
+
 		if (fs.existsSync(sessionFile)) {
 			try {
 				const content = this._decryptAndDecompress(fs.readFileSync(sessionFile));
-				const existing: ChatSession = JSON.parse(content);
-				createdAt = existing.createdAt;
+				if (content) {
+					existingSession = JSON.parse(content);
+				}
 			} catch {}
 		} else if (fs.existsSync(oldSessionFile)) {
 			try {
-				const existing: ChatSession = JSON.parse(fs.readFileSync(oldSessionFile, 'utf-8'));
-				createdAt = existing.createdAt;
+				existingSession = JSON.parse(fs.readFileSync(oldSessionFile, 'utf-8'));
 			} catch {}
+		}
+
+		if (existingSession) {
+			createdAt = existingSession.createdAt;
+			updatedAt = existingSession.updatedAt;
+		}
+
+		const newMessages = this._messages.map(m => ({ ...m, isStreaming: false }));
+		
+		const contentChanged = !existingSession || 
+							 existingSession.title !== title || 
+							 existingSession.email !== this._userEmail || 
+							 JSON.stringify(existingSession.messages) !== JSON.stringify(newMessages);
+
+		if (forceUpdateTimestamp && contentChanged) {
+			updatedAt = Date.now();
 		}
 
 		const session: ChatSession = {
@@ -213,8 +232,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			title,
 			email: this._userEmail,
 			createdAt,
-			updatedAt: Date.now(),
-			messages: this._messages.map(m => ({ ...m, isStreaming: false })),
+			updatedAt,
+			messages: newMessages,
 		};
 		
 		try {
@@ -263,7 +282,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 					}
 				} catch {}
 			}
-			return Array.from(summariesMap.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+			return Array.from(summariesMap.values()).sort((a, b) => {
+				if (b.updatedAt !== a.updatedAt) {
+					return b.updatedAt - a.updatedAt;
+				}
+				return b.id.localeCompare(a.id);
+			});
 		} catch {
 			return [];
 		}
@@ -376,7 +400,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		});
 
 		vscode.workspace.onDidChangeWorkspaceFolders(() => {
-			this._saveCurrentSession();
+			this._saveCurrentSession(false);
 			this._createNewSession();
 			this._syncMessages();
 			this._broadcastHistoryList();
@@ -416,7 +440,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				this._broadcastHistoryList();
 				break;
 			case 'logout':
-				this._saveCurrentSession();
+				this._saveCurrentSession(false);
 				this._userEmail = '';
 				this._createNewSession();
 				this._syncMessages();
@@ -481,7 +505,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				this._broadcastHistoryList();
 				break;
 			case 'loadSession':
-				this._saveCurrentSession();
+				this._saveCurrentSession(false);
 				this._loadSessionById(data.sessionId);
 				this._broadcastHistoryList();
 				break;
@@ -489,7 +513,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				this._deleteSession(data.sessionId);
 				break;
 			case 'newChat':
-				this._saveCurrentSession();
+				this._saveCurrentSession(false);
 				this._createNewSession();
 				this._syncMessages();
 				this._broadcastHistoryList();
@@ -573,7 +597,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		const workspaceFolders = vscode.workspace.workspaceFolders;
 		const workspaceOpen = !!workspaceFolders && workspaceFolders.length > 0;
 		const workspaceRoot = workspaceOpen ? workspaceFolders![0].uri.fsPath : undefined;
-		const message = { type: 'syncMessages', messages: this._messages, workspaceOpen, workspaceRoot };
+		const message = { 
+			type: 'syncMessages', 
+			messages: this._messages, 
+			sessionId: this._currentSessionId,
+			workspaceOpen, 
+			workspaceRoot 
+		};
 		if (this._view) { this._view.webview.postMessage(message); }
 		if (this._panel) { this._panel.webview.postMessage(message); }
 	}

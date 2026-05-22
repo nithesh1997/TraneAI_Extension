@@ -36,6 +36,7 @@ const ChatApp: React.FC = () => {
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
 	const [currentSessionId, setCurrentSessionId] = useState('');
+	const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
 	const [workspaceOpen, setWorkspaceOpen] = useState(true);
 	const [workspaceRoot, setWorkspaceRoot] = useState<string>(() => {
 		const state = vscode.getState();
@@ -84,6 +85,7 @@ const ChatApp: React.FC = () => {
 						vscode.setState({ ...state, workspaceRoot: message.workspaceRoot });
 					}
 					setIsLoading(false);
+					setLoadingSessionId(null);
 					break;
 				case 'typing':
 					setIsTyping(message.value);
@@ -94,6 +96,7 @@ const ChatApp: React.FC = () => {
 				case 'historyList':
 					setHistorySessions(message.sessions);
 					setCurrentSessionId(message.currentSessionId);
+					setLoadingSessionId(null);
 					if (message.workspaceOpen !== undefined) {
 						setWorkspaceOpen(message.workspaceOpen);
 					}
@@ -147,7 +150,7 @@ const ChatApp: React.FC = () => {
 	}, []);
 
 	const handleLoadSession = useCallback((sessionId: string) => {
-		setIsLoading(true);
+		setLoadingSessionId(sessionId);
 		vscode.postMessage({ command: 'loadSession', sessionId });
 	}, []);
 
@@ -277,6 +280,7 @@ const ChatApp: React.FC = () => {
 			<ChatHistory
 				sessions={historySessions}
 				currentSessionId={currentSessionId}
+				loadingSessionId={loadingSessionId}
 				visible={historyOpen}
 				onClose={() => setHistoryOpen(false)}
 				onLoadSession={handleLoadSession}

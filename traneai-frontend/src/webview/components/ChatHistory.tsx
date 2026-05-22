@@ -10,6 +10,7 @@ export interface SessionSummary {
 interface ChatHistoryProps {
 	sessions: SessionSummary[];
 	currentSessionId: string;
+	loadingSessionId: string | null;
 	visible: boolean;
 	onClose: () => void;
 	onLoadSession: (sessionId: string) => void;
@@ -57,6 +58,7 @@ function groupSessions(sessions: SessionSummary[]): SessionGroup[] {
 export const ChatHistory: React.FC<ChatHistoryProps> = ({
 	sessions,
 	currentSessionId,
+	loadingSessionId,
 	visible,
 	onClose,
 	onLoadSession,
@@ -95,11 +97,21 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
 								{group.sessions.map(session => (
 									<div
 										key={session.id}
-										className={`history-item${session.id === currentSessionId ? ' history-item--active' : ''}`}
-										onClick={() => { onLoadSession(session.id); onClose(); }}
+										className={`history-item${session.id === currentSessionId ? ' history-item--active' : ''}${session.id === loadingSessionId ? ' history-item--loading' : ''}`}
+										onClick={() => { 
+											if (session.id !== loadingSessionId) {
+												onLoadSession(session.id); 
+												// Don't close immediately to show loader
+												setTimeout(onClose, 150);
+											}
+										}}
 									>
 										<div className="history-item-title">{session.title}</div>
-										{session.id === currentSessionId && (
+										{session.id === loadingSessionId ? (
+											<div className="history-item-loader">
+												<div className="history-spinner"></div>
+											</div>
+										) : session.id === currentSessionId && (
 											<span className="history-item-current">Current</span>
 										)}
 										<button

@@ -135,6 +135,31 @@
       color: var(--accent);
     }
   }
+
+  &--loading {
+    pointer-events: none;
+    opacity: 0.8;
+  }
+}
+
+.history-item-loader {
+  flex-shrink: 0;
+  margin-right: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.history-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(88, 166, 255, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: history-spin 0.6s linear infinite;
+}
+
+@keyframes history-spin {
+  to { transform: rotate(360deg); }
 }
 
 .history-group {
