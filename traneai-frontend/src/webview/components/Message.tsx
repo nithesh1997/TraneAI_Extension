@@ -16,15 +16,52 @@ type MessagePart =
 
 // --- Helpers ---
 
+const getFileIcon = (filePath: string) => {
+	const ext = filePath.split('.').pop()?.toLowerCase();
+	switch (ext) {
+		case 'tsx':
+		case 'jsx':
+			return <span className="file-icon react-icon">⚛️</span>;
+		case 'ts':
+		case 'js':
+			return <span className="file-icon ts-icon">TS</span>;
+		case 'scss':
+		case 'css':
+		case 'sass':
+			return <span className="file-icon style-icon">🎨</span>;
+		case 'html':
+			return <span className="file-icon html-icon">HTML</span>;
+		case 'json':
+			return <span className="file-icon json-icon">{}</span>;
+		case 'md':
+			return <span className="file-icon md-icon">M↓</span>;
+		default:
+			return <span className="file-icon">📄</span>;
+	}
+};
+
 const computeLineDiff = (oldContent: string, newContent: string) => {
-	const oldLines = oldContent.split('\n');
-	const newLines = newContent.split('\n');
+	// Clean up any leaked tags or markdown residue aggressively
+	const cleanTags = (t: string) => t
+		.replace(/\[EDIT_PROPOSAL\]|\[END_EDIT\]/g, '')
+		.replace(/file: .*?(\r?\n|$)/g, '')
+		.replace(/old: \|(\r?\n|$)/g, '')
+		.replace(/new: \|(\r?\n|$)/g, '')
+		.replace(/status: .*?(\r?\n|$)/g, '')
+		.replace(/message: .*?(\r?\n|$)/g, '')
+		.replace(/^```(\w+)?(\r?\n|$)/gm, '')
+		.replace(/```$/gm, '')
+		.trim();
+
+	const cleanOld = cleanTags(oldContent);
+	const cleanNew = cleanTags(newContent);
+
+	const oldLines = cleanOld.split('\n');
+	const newLines = cleanNew.split('\n');
 	const result: { type: 'unchanged' | 'removed' | 'added'; content: string; oldLineNum?: number; newLineNum?: number }[] = [];
 	
 	let i = 0;
 	let j = 0;
-	let added = 0;
-	let removed = 0;
 	
 	while (i < oldLines.length || j < newLines.length) {
 		if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
@@ -36,20 +73,73 @@ const computeLineDiff = (oldContent: string, newContent: string) => {
 			if (i < oldLines.length && (nextMatchInNew === -1 || nextMatchInNew > j + 5)) {
 				result.push({ type: 'removed', content: oldLines[i], oldLineNum: i + 1 });
 				i++;
-				removed++;
 			} else if (j < newLines.length) {
 				result.push({ type: 'added', content: newLines[j], newLineNum: j + 1 });
 				j++;
-				added++;
 			} else if (i < oldLines.length) {
 				result.push({ type: 'removed', content: oldLines[i], oldLineNum: i + 1 });
 				i++;
-				removed++;
 			}
 		}
 	}
 	
-	return { lines: result, added, removed };
+	return { lines: result };
+};
+
+const ModernDiffView: React.FC<{
+	filePath: string;
+	oldContent: string;
+	newContent: string;
+	onCopy: (text: string) => void;
+}> = ({ filePath, oldContent, newContent, onCopy }) => {
+	const [isExpanded, setIsExpanded] = React.useState(true);
+	const [copied, setCopied] = React.useState(false);
+	const diff = React.useMemo(() => computeLineDiff(oldContent, newContent), [oldContent, newContent]);
+	const ext = filePath.split('.').pop()?.toUpperCase() || 'FILE';
+	
+	const handleCopy = (e: React.MouseEvent) => {
+		e.stopPropagation();
+		const newVersion = diff.lines
+			.filter(l => l.type !== 'removed')
+			.map(l => l.content)
+			.join('\n');
+		onCopy(newVersion);
+		setCopied(true);
+		setTimeout(() => setCopied(false), 2000);
+	};
+
+	return (
+		<div className={`modern-diff-view ${!isExpanded ? 'collapsed' : ''}`}>
+			<div className="modern-diff-header" onClick={() => setIsExpanded(!isExpanded)}>
+				<div className="modern-diff-file-info">
+					{getFileIcon(filePath)}
+					<span className="modern-diff-filename">{ext}</span>
+				</div>
+				<div className="modern-diff-actions">
+					<button className={`modern-diff-action-btn copy-btn ${copied ? 'copied' : ''}`} title="Copy new version" onClick={handleCopy}>
+						<span className="icon">{copied ? '✓' : '📋'}</span>
+						{copied && <span className="copied-text">Copied!</span>}
+					</button>
+					<button className="modern-diff-action-btn" title={isExpanded ? "Collapse" : "Expand"}>
+						<span className="icon">{isExpanded ? '↕️' : '↔️'}</span>
+					</button>
+				</div>
+			</div>
+			{isExpanded && (
+				<div className="modern-diff-content">
+					<div className="modern-diff-hunk-header">
+						@@ -1,1 +1,1 @@
+					</div>
+					{diff.lines.map((line, i) => (
+						<div key={i} className={`modern-diff-line ${line.type}`}>
+							<span className="modern-diff-marker">{line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}</span>
+							<pre className="modern-diff-code">{line.content}</pre>
+						</div>
+					))}
+				</div>
+			)}
+		</div>
+	);
 };
 
 const formatTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -152,59 +242,93 @@ const EditPreview: React.FC<{
 	onShowDiff: () => void;
 }> = ({ edit, onApply, onReject, onRevert, onShowDiff }) => {
 	const [status, setStatus] = React.useState<'pending' | 'applied' | 'rejected'>('pending');
-	const diff = React.useMemo(() => computeLineDiff(edit.oldContent, edit.newContent), [edit]);
 	
-	if (status === 'applied') {
-		return (
-			<div className="edit-preview edit-applied">
-				<div className="edit-preview-header">
-					<div className="edit-file-info">📄 {edit.filePath}</div>
-					<span className="edit-status applied">Applied</span>
-				</div>
-				<div className="edit-actions">
-					<button className="edit-action-btn secondary-btn" onClick={() => { setStatus('pending'); onRevert(); }}>Revert</button>
-					<button className="edit-action-btn secondary-btn" onClick={onShowDiff}>Full Diff</button>
-				</div>
-			</div>
-		);
-	}
+	const isNewFile = edit.oldContent.trim() === '';
 
 	return (
-		<div className="edit-preview">
+		<div className={`edit-preview ${status === 'applied' ? 'edit-applied' : status === 'rejected' ? 'edit-rejected' : ''}`}>
 			<div className="edit-preview-header">
-				<div className="edit-file-info">📄 {edit.filePath}</div>
-				<div className="edit-stats"><span className="stat-add">+{diff.added}</span> <span className="stat-rem">-{diff.removed}</span></div>
+				<div className="changes-title">
+					<span className="changes-icon">📁</span>
+					<span>Changes</span>
+				</div>
+				<div className="edit-actions-header">
+					{status === 'applied' ? (
+						<button className="edit-action-btn-header revert-btn" onClick={() => { setStatus('pending'); onRevert(); }}>
+							<span className="btn-icon">↺</span> Revert
+						</button>
+					) : (
+						<button className="edit-action-btn-header apply-btn" onClick={() => { setStatus('applied'); onApply(); }}>
+							✓ Apply
+						</button>
+					)}
+				</div>
 			</div>
-			<div className="edit-diff-container">
-				{diff.lines.map((line, i) => (
-					<div key={i} className={`diff-line ${line.type}`}>
-						<span className="diff-marker">{line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}</span>
-						<pre className="diff-content">{line.content}</pre>
+			
+			<div className="multi-edit-list">
+				<div className="multi-edit-item" onClick={onShowDiff}>
+					<div className="multi-edit-item-content">
+						{getFileIcon(edit.filePath)}
+						<span className="multi-edit-path">{edit.filePath}</span>
 					</div>
-				))}
-			</div>
-			<div className="edit-actions">
-				<button className="edit-action-btn apply-btn" onClick={() => { setStatus('applied'); onApply(); }}>Accept</button>
-				<button className="edit-action-btn discard-btn" onClick={() => { setStatus('rejected'); onReject(); }}>Discard</button>
-				<button className="edit-action-btn secondary-btn" onClick={onShowDiff}>Full Diff</button>
+					{isNewFile && <span className="status-badge new">New</span>}
+					<span className="chevron-icon">›</span>
+				</div>
 			</div>
 		</div>
 	);
 };
 
-const MultiEditPreview: React.FC<{ edits: EditProposal[]; onApply: (es: EditProposal[]) => void; onShowDiff: (e: EditProposal) => void }> = ({ edits, onApply, onShowDiff }) => {
+const MultiEditPreview: React.FC<{ 
+	edits: EditProposal[]; 
+	onApply: (es: EditProposal[]) => void; 
+	onRevert: (es: EditProposal[]) => void;
+	onShowDiff: (e: EditProposal) => void 
+}> = ({ edits, onApply, onRevert, onShowDiff }) => {
 	const [status, setStatus] = React.useState<'pending' | 'applied'>('pending');
-	if (status === 'applied') return <div className="edit-preview edit-applied"><div className="edit-preview-header">Updated {edits.length} files</div></div>;
+	
+	// Group edits by file path
+	const groupedEdits = React.useMemo(() => {
+		const groups: { [path: string]: EditProposal[] } = {};
+		edits.forEach(edit => {
+			if (!groups[edit.filePath]) groups[edit.filePath] = [];
+			groups[edit.filePath].push(edit);
+		});
+		return groups;
+	}, [edits]);
+
 	return (
-		<div className="edit-preview">
-			<div className="edit-preview-header">Proposed changes in {edits.length} files</div>
-			<div className="multi-edit-list">
-				{edits.map((e, idx) => (
-					<div key={idx} className="multi-edit-item" onClick={() => onShowDiff(e)}>📄 {e.filePath}</div>
-				))}
+		<div className={`edit-preview ${status === 'applied' ? 'edit-applied' : ''}`}>
+			<div className="edit-preview-header">
+				<div className="changes-title">
+					<span className="changes-icon">📁</span>
+					<span>Changes</span>
+				</div>
+				<div className="edit-actions-header">
+					{status === 'applied' ? (
+						<button className="edit-action-btn-header revert-btn" onClick={() => { setStatus('pending'); onRevert(edits); }}>
+							<span className="btn-icon">↺</span> Revert all
+						</button>
+					) : (
+						<button className="edit-action-btn-header apply-all-btn" onClick={() => { setStatus('applied'); onApply(edits); }}>
+							✓ Apply all
+						</button>
+					)}
+				</div>
 			</div>
-			<div className="edit-actions">
-				<button className="edit-action-btn apply-all-btn" onClick={() => { setStatus('applied'); onApply(edits); }}>Accept All</button>
+			
+			<div className="multi-edit-list">
+				{Object.entries(groupedEdits).map(([filePath, fileEdits], idx) => (
+					<div key={idx} className="multi-edit-item" onClick={() => onShowDiff(fileEdits[0])}>
+						<div className="multi-edit-item-content">
+							{getFileIcon(filePath)}
+							<span className="multi-edit-path">{filePath}</span>
+							{fileEdits.length > 1 && <span className="edit-count-badge">{fileEdits.length} changes</span>}
+						</div>
+						{fileEdits.some(e => e.oldContent.trim() === '') && <span className="status-badge new">New</span>}
+						<span className="chevron-icon">›</span>
+					</div>
+				))}
 			</div>
 		</div>
 	);
@@ -328,8 +452,8 @@ const PlanView: React.FC<{ steps: { text: string; completed: boolean }[] }> = ({
 
 const parseMessageParts = (text: string): MessagePart[] => {
   const result: MessagePart[] = [];
-  const editRegex = /\[EDIT_PROPOSAL\]\nfile: (.*?)\nold: \|\n([\s\S]*?)\nnew: \|\n([\s\S]*?)\nstatus: (.*?)\nmessage: (.*?)\n\[END_EDIT\]/g;
-  const legacyEditRegex = /\[EDIT_PROPOSAL\]\nfile: (.+?)\nold: \|\n([\s\S]*?)\nnew: \|\n([\s\S]*?)\n\[END_EDIT\]/g;
+  const editRegex = /(?:```\r?\n?)?\[EDIT_PROPOSAL\]\r?\nfile: (.*?)\r?\nold: \|\r?\n([\s\S]*?)\r?\nnew: \|\r?\n([\s\S]*?)\r?\nstatus: (.*?)\r?\nmessage: (.*?)\r?\n\[END_EDIT\](?:\r?\n?```)?/g;
+  const legacyEditRegex = /(?:```\r?\n?)?\[EDIT_PROPOSAL\]\r?\nfile: (.+?)\r?\nold: \|\r?\n((?:(?!\[EDIT_PROPOSAL\]|\[END_EDIT\]|new: \|)[\s\S])*?)\r?\nnew: \|\r?\n((?:(?!\[EDIT_PROPOSAL\]|\[END_EDIT\])[\s\S])*?)\r?\n\[END_EDIT\](?:\r?\n?```)?/g;
   const stepRegex = /\[STEP\] (.*?) (?:\| (.*?))?\[\/STEP\]/g;
   const cmdRegex = /```cmd-result\n([\s\S]*?)```/g;
   const cmdProposalRegex = /\[COMMAND_PROPOSAL\]\ncommand: (.*?)\nstatus: (.*?)\nmessage: (.*?)\n\[END_COMMAND\]/g;
@@ -373,15 +497,26 @@ const parseMessageParts = (text: string): MessagePart[] => {
   if (lastIndex < text.length) result.push({ type: 'markdown', content: text.substring(lastIndex) });
 
   const finalParts: MessagePart[] = [];
+  const editProposals: EditProposal[] = [];
+
   for (const part of result) {
     if (part.type === 'editProposal') {
-      const last = finalParts[finalParts.length - 1];
-      if (last && last.type === 'multiEditProposal') last.edits.push(part.edit);
-      else if (last && last.type === 'editProposal') finalParts[finalParts.length - 1] = { type: 'multiEditProposal', edits: [last.edit, part.edit] };
-      else finalParts.push(part);
-    } else if (part.type === 'markdown' && !part.content.trim()) continue;
-    else finalParts.push(part);
+      editProposals.push(part.edit);
+    } else if (part.type === 'markdown' && !part.content.trim()) {
+      continue;
+    } else {
+      finalParts.push(part);
+    }
   }
+
+  if (editProposals.length > 0) {
+    if (editProposals.length === 1) {
+      finalParts.push({ type: 'editProposal', edit: editProposals[0] });
+    } else {
+      finalParts.push({ type: 'multiEditProposal', edits: editProposals });
+    }
+  }
+
   return finalParts;
 };
 
@@ -434,6 +569,28 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 					<span className="msg-time">{isUser ? relativeTime : formatTime(message.timestamp)}</span>
 				</div>
 				<div className="msg-bubble">
+					{message.attachments && message.attachments.length > 0 && (
+						<div className="msg-attachments">
+							{message.attachments.map((attachment, idx) => (
+								<div key={idx} className={`msg-attachment ${attachment.type}`}>
+									{attachment.type === 'image' && attachment.imageData ? (
+										<img
+											className="msg-image"
+											src={`data:${attachment.mimeType || 'image/jpeg'};base64,${attachment.imageData}`}
+											alt={attachment.name}
+											title={attachment.name}
+											style={{height:"30px",width:'30px'}}
+										/>
+									) : (
+										<div className="msg-attachment-file">
+											<span className="attachment-icon">📎</span>
+											<span className="attachment-name">{attachment.name}</span>
+										</div>
+									)}
+								</div>
+							))}
+						</div>
+					)}
 					{parts.map((p, idx) => {
 						if (p.type === 'markdown') return <div key={idx} className="msg-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.content) }} />;
 						if (p.type === 'actionStep') return <ActionStepView key={idx} {...p} onOpenFile={onOpenFile} />;
@@ -443,8 +600,41 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 								vscode.postMessage({ command: 'executeCommand', cmd: cmd });
 							}
 						}} />;
-						if (p.type === 'editProposal') return <EditPreview key={idx} edit={p.edit} onApply={() => onApplyEdit?.(p.edit)} onReject={() => onRejectEdit?.(p.edit)} onRevert={() => onRevertEdit?.(p.edit)} onShowDiff={() => onShowDiff?.(p.edit)} />;
-						if (p.type === 'multiEditProposal') return <MultiEditPreview key={idx} edits={p.edits} onApply={onApplyMultiEdit || (() => {})} onShowDiff={onShowDiff || (() => {})} />;
+						if (p.type === 'editProposal') {
+							return (
+								<React.Fragment key={idx}>
+									<ModernDiffView filePath={p.edit.filePath} oldContent={p.edit.oldContent} newContent={p.edit.newContent} onCopy={onCopy} />
+									<EditPreview edit={p.edit} onApply={() => onApplyEdit?.(p.edit)} onReject={() => onRejectEdit?.(p.edit)} onRevert={() => onRevertEdit?.(p.edit)} onShowDiff={() => onShowDiff?.(p.edit)} />
+								</React.Fragment>
+							);
+						}
+						if (p.type === 'multiEditProposal') {
+							const groups: { [path: string]: EditProposal[] } = {};
+							p.edits.forEach(e => {
+								if (!groups[e.filePath]) groups[e.filePath] = [];
+								groups[e.filePath].push(e);
+							});
+							
+							return (
+								<React.Fragment key={idx}>
+									{Object.entries(groups).map(([filePath, fileEdits], gIdx) => (
+										<ModernDiffView 
+											key={gIdx} 
+											filePath={filePath} 
+											oldContent={fileEdits.map(e => e.oldContent).join('\n...\n')} 
+											newContent={fileEdits.map(e => e.newContent).join('\n...\n')} 
+											onCopy={onCopy} 
+										/>
+									))}
+									<MultiEditPreview 
+										edits={p.edits} 
+										onApply={(es) => onApplyMultiEdit?.(es)} 
+										onRevert={(es) => es.forEach(e => onRevertEdit?.(e))}
+										onShowDiff={(e) => onShowDiff?.(e)} 
+									/>
+								</React.Fragment>
+							);
+						}
 						if (p.type === 'plan') return <PlanView key={idx} steps={p.steps} />;
 						return null;
 					})}

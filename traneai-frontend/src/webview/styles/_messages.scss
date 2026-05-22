@@ -1,15 +1,15 @@
 // Edit & Multi-Edit Previews
 .edit-preview {
-  margin: 12px 0;
+  margin: 16px 0;
   background: #1e1e1e;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   animation: fadeSlide 0.25s ease-out;
 
-  &.edit-applied { border-color: rgba(34, 197, 94, 0.3); background: rgba(34, 197, 94, 0.02); }
-  &.edit-rejected { border-color: rgba(239, 68, 68, 0.3); opacity: 0.8; }
+  &.edit-applied { border-color: rgba(34, 197, 94, 0.2); }
+  &.edit-rejected { opacity: 0.7; }
 
   .edit-preview-header {
     display: flex;
@@ -17,147 +17,175 @@
     justify-content: space-between;
     padding: 10px 14px;
     background: rgba(255, 255, 255, 0.03);
-    border-bottom: 1px solid var(--border);
-  }
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 
-  .edit-file-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-primary);
+    .changes-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
 
-    .file-icon {
-      font-size: 10px;
-      font-weight: 800;
-      background: var(--bg-tertiary);
-      padding: 2px 4px;
-      border-radius: 4px;
-      color: #f97316;
-      border: 1px solid rgba(249, 115, 22, 0.3);
+      .changes-icon {
+        font-size: 14px;
+        opacity: 0.8;
+      }
+    }
+
+    .edit-actions-header {
+      display: flex;
+      gap: 8px;
+
+      .edit-action-btn-header {
+        background: none;
+        border: none;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.2s;
+
+        &.apply-btn, &.apply-all-btn {
+          background: #f85149; // Matching the red button in screenshot
+          color: white;
+          &:hover { opacity: 0.9; transform: translateY(-1px); }
+        }
+
+        &.revert-btn {
+          background: rgba(255, 255, 255, 0.03);
+          color: #cccccc;
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+          &:hover { 
+            background: rgba(255, 255, 255, 0.08); 
+            border-color: rgba(255, 255, 255, 0.25);
+            color: #ffffff;
+          }
+        }
+
+        .btn-icon {
+          font-size: 14px;
+        }
+      }
     }
   }
 
-  .edit-filename {
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .multi-edit-list {
+    background: transparent;
 
-  .edit-stats {
-    display: flex;
-    gap: 8px;
-    font-size: 12px;
-    font-weight: 700;
+    .multi-edit-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 14px;
+      gap: 12px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      transition: background 0.2s;
 
-    .stat-add { color: #4ade80; }
-    .stat-rem { color: #f87171; }
-  }
+      &:last-child { border-bottom: none; }
+      &:hover { background: rgba(255, 255, 255, 0.04); }
 
-  .edit-status {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    padding: 2px 8px;
-    border-radius: 4px;
-    
-    &.applied { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
-    &.rejected { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+      .multi-edit-item-content {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 1;
+        min-width: 0;
+
+      .file-icon {
+        font-size: 14px;
+        opacity: 0.9;
+        font-family: var(--font-mono);
+        min-width: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        &.react-icon { color: #61dafb; font-size: 16px; }
+        &.ts-icon { color: #3178c6; font-size: 11px; font-weight: 800; }
+        &.style-icon { color: #cc6699; }
+        &.html-icon { color: #e34f26; font-size: 10px; font-weight: 800; }
+        &.json-icon { color: #f9cb28; }
+        &.md-icon { color: #0081ff; }
+      }
+
+        .multi-edit-path {
+          font-size: 13px;
+          color: var(--text-secondary);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-family: var(--font-mono);
+        }
+      }
+
+      .status-badge {
+        font-size: 10px;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: 10px;
+        text-transform: uppercase;
+
+        &.new {
+          background: rgba(34, 197, 94, 0.15);
+          color: #4ade80;
+          border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+      }
+
+      .chevron-icon {
+        font-size: 16px;
+        color: var(--text-muted);
+        opacity: 0.5;
+      }
+    }
   }
 
   .edit-diff-container {
     background: #0d0d0d;
     padding: 12px;
-    max-height: 250px;
+    max-height: 200px;
     overflow-y: auto;
     font-family: var(--font-mono);
     font-size: 12px;
-    border-bottom: 1px solid var(--border);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
 
-    &::-webkit-scrollbar { width: 5px; }
-    &::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+    .multi-diff-item {
+      margin-bottom: 12px;
+      &:last-child { margin-bottom: 0; }
+
+      .diff-file-label {
+        font-size: 11px;
+        color: #f97316;
+        margin-bottom: 4px;
+        font-weight: 700;
+        opacity: 0.8;
+      }
+    }
 
     .diff-line {
       display: flex;
       white-space: pre;
       line-height: 1.5;
 
-      &.added { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
-      &.removed { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+      &.added { background: rgba(34, 197, 94, 0.1); color: #4ade80; }
+      &.removed { background: rgba(239, 68, 68, 0.1); color: #f87171; }
 
-      .diff-marker { width: 16px; opacity: 0.5; user-select: none; }
+      .diff-marker { width: 16px; opacity: 0.4; user-select: none; }
       .diff-content { margin: 0; padding: 0; font-family: inherit; }
     }
-  }
 
-  .edit-actions {
-    display: flex;
-    gap: 8px;
-    padding: 10px;
-    background: rgba(0, 0, 0, 0.2);
-
-    button {
-      flex: 1;
-      padding: 6px 0;
-      font-size: 12px;
-      font-weight: 600;
-      border-radius: 6px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .apply-btn { 
-      background: #2563eb; color: white; border: none;
-      &:hover { background: #3b82f6; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
-    }
-
-    .apply-all-btn {
-      background: #10b981; color: white; border: none;
-      &:hover { background: #059669; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3); }
-    }
-
-    .discard-btn { 
-      background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);
-      &:hover { background: rgba(239, 68, 68, 0.2); border-color: #f87171; }
-    }
-
-    .secondary-btn { 
-      background: rgba(255, 255, 255, 0.05); color: var(--text-secondary); border: 1px solid var(--border);
-      &:hover { background: rgba(255, 255, 255, 0.1); color: white; border-color: var(--border-focus); }
-    }
-  }
-}
-
-.multi-edit-list {
-  padding: 8px 0;
-  background: #161616;
-  border-bottom: 1px solid var(--border);
-
-  .multi-edit-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 14px;
-    cursor: pointer;
-    transition: background 0.15s;
-
-    &:hover {
-      background: rgba(255, 255, 255, 0.04);
-      .icon-btn { opacity: 1; }
-    }
-
-    .multi-edit-item-content { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .multi-edit-path { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    
-    .icon-btn { 
-      background: none; border: none; color: var(--text-muted); opacity: 0.4; cursor: pointer; padding: 4px; border-radius: 4px;
-      &:hover { background: rgba(255,255,255,0.1); color: white; }
+    .diff-more {
+      padding: 8px 0;
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: center;
+      font-style: italic;
     }
   }
 }
@@ -834,6 +862,53 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+}
+
+.msg-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.msg-attachment {
+  max-width: 100%;
+  display: inline-block;
+  border-radius: 8px;
+  overflow: hidden;
+
+  &.image {
+    .msg-image {
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: block;
+    }
+  }
+
+  &.file {
+    .msg-attachment-file {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+
+      .attachment-icon {
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
+      .attachment-name {
+        font-size: 13px;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
   }
 }
 
