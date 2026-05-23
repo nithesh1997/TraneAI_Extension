@@ -4,6 +4,8 @@
  * and delegates AI/automation actions to the backend and helper services.
  */
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { buildWebviewHtml } from './webview/WebviewTemplate';
 import { CheckpointManager } from './services/checkpointManager';
 import { AutomationWorkflows } from './services/AutomationWorkflows';
@@ -33,6 +35,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 		this._checkpointManager = new CheckpointManager(_extensionUri);
 		this.sessionManager = new SessionManager();
 		this.actionHandler = new ChatActionHandler(this);
+	}
+
+	public findWorkspaceAppRoot(): string | undefined {
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders || workspaceFolders.length === 0) {
+			return undefined;
+		}
+
+		// Try to find the folder containing package.json or other markers
+		for (const folder of workspaceFolders) {
+			const root = folder.uri.fsPath;
+			if (fs.existsSync(path.join(root, 'package.json')) || 
+				fs.existsSync(path.join(root, 'pom.xml')) ||
+				fs.existsSync(path.join(root, 'requirements.txt')) ||
+				fs.existsSync(path.join(root, 'go.mod'))) {
+				return root;
+			}
+		}
+
+		return workspaceFolders[0].uri.fsPath;
 	}
 
 	public get checkpointManager() {
