@@ -1535,9 +1535,23 @@ private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: strin
 							: 'npm start';
 
 						log(`\x1b[32m  → Running: ${startCmd}\x1b[0m\r\n`);
-						log(`\x1b[33m  → Process will be tracked for cleanup on Ctrl+C\x1b[0m\r\n`);
 						pushStatus(`Step 5/5 in progress: Running \`${startCmd}\`.`);
 
+						if (process.platform === 'win32') {
+							log(`\x1b[33m  → Opening in external terminal window (Windows)...\x1b[0m\r\n`);
+							// Start in a new command prompt window and keep it open (/k)
+							const externalCmd = `start cmd /k "cd /d "${rootPath}" && ${startCmd}"`;
+							exec(externalCmd);
+							
+							pushStatus(`Step 5/5 complete: Application started in external terminal.`);
+							log(`\x1b[32m  ✓ External terminal launched\x1b[0m\r\n`);
+							
+							// For external terminal, we don't track the PID or capture output
+							// since it's now handled by the user in the new window.
+							return;
+						}
+
+						log(`\x1b[33m  → Process will be tracked for cleanup on Ctrl+C\x1b[0m\r\n`);
 						// Spawn the process with a shell
 						const startProc = exec(startCmd, { cwd: rootPath });
 						
@@ -1547,8 +1561,7 @@ private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: strin
 							log(`\x1b[32m  → Main process PID: ${mainProcessPid}\x1b[0m\r\n`);
 							
 							// On Linux/Mac, also try to find the Node.js child process
-							if (process.platform !== 'win32') {
-								setTimeout(() => {
+							setTimeout(() => {
 									try {
 										// Find the actual node process spawned by npm
 										const psResult = execSync(`pgrep -P ${mainProcessPid}`, { encoding: 'utf8' });
@@ -1562,7 +1575,6 @@ private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: strin
 										// No child processes found yet
 									}
 								}, 1000);
-							}
 						}
 						
 						let hasOpenedUrl = false;
