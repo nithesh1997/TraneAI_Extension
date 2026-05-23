@@ -143,22 +143,29 @@ const ModernDiffView: React.FC<{
 	);
 };
 
-const formatTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const formatWhatsAppTime = (ts: number): string => {
+	const now = new Date();
+	const date = new Date(ts);
+	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+	const yesterdayStart = todayStart - 86400000;
+
+	if (ts >= todayStart) {
+		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+	if (ts >= yesterdayStart) {
+		return 'Yesterday';
+	}
+	if (date.getFullYear() === now.getFullYear()) {
+		return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+	}
+	return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+};
 
 const getNameFromEmail = (email: string | null | undefined): string => {
 	if (!email) return 'User';
 	const local = email.split('@')[0];
 	const name = local.split(/[._-]/)[0];
 	return name.charAt(0).toUpperCase() + name.slice(1);
-};
-
-const getRelativeTime = (ts: number): string => {
-	const diffMs = Date.now() - ts;
-	const diffSec = Math.floor(diffMs / 1000);
-	if (diffSec < 60) return `${diffSec}s ago`;
-	const diffMin = Math.floor(diffSec / 60);
-	if (diffMin < 60) return `${diffMin}m ago`;
-	return `${Math.floor(diffMin / 60)}h ago`;
 };
 
 const processInlineMarkdown = (text: string): string => {
@@ -683,7 +690,6 @@ interface MessageProps {
 
 export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, userEmail, onApplyEdit, onApplyMultiEdit, onRejectEdit, onRevertEdit, onShowDiff, onOpenFile, onFixCommand, onSelectChoice }) => {
 	const isUser = message.role === 'user';
-	const [relativeTime, setRelativeTime] = React.useState(() => getRelativeTime(message.timestamp));
 	const parts = React.useMemo(() => parseMessageParts(message.text), [message.text]);
 
 	return (
@@ -692,7 +698,7 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 			<div className="msg-body">
 				<div className="msg-meta">
 					<span className="msg-author">{isUser ? getNameFromEmail(userEmail) : 'TraneAI'}</span>
-					<span className="msg-time">{isUser ? relativeTime : formatTime(message.timestamp)}</span>
+					<span className="msg-time">{formatWhatsAppTime(message.timestamp)}</span>
 				</div>
 				<div className="msg-bubble">
 					{message.attachments && message.attachments.length > 0 && (
