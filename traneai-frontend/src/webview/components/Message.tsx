@@ -12,7 +12,8 @@ type MessagePart =
   | { type: 'actionStep'; label: string; detail?: string; status: 'pending' | 'success' | 'error' }
   | { type: 'editProposal'; edit: EditProposal }
   | { type: 'multiEditProposal'; edits: EditProposal[] }
-  | { type: 'plan'; steps: { text: string; completed: boolean }[] };
+  | { type: 'plan'; steps: { text: string; completed: boolean }[] }
+  | { type: 'choice'; choices: string[]; placeholder?: string; command?: string };
 
 // --- Helpers ---
 
@@ -448,6 +449,114 @@ const PlanView: React.FC<{ steps: { text: string; completed: boolean }[] }> = ({
 	);
 };
 
+const ChoiceView: React.FC<{
+	choices: string[];
+	placeholder?: string;
+	onSelect: (choice: string) => void;
+}> = ({ choices, placeholder, onSelect }) => {
+	const [search, setSearch] = React.useState('');
+	const [showDropdown, setShowDropdown] = React.useState(false);
+	const [selected, setSelected] = React.useState('');
+
+	const filtered = choices.filter(c => c.toLowerCase().includes(search.toLowerCase()));
+
+	return (
+		<div className="branch-selector-container animated-pop">
+			<div className="branch-selector-label">BRANCH</div>
+			<div className="branch-selector-custom" style={{ position: 'relative', width: '100%', maxWidth: '400px' }}>
+				<div 
+					className="branch-trigger" 
+					onClick={() => setShowDropdown(!showDropdown)}
+					style={{
+						background: 'var(--bg-secondary)', 
+						color: 'var(--text-primary)', 
+						border: '1px solid var(--border)', 
+						borderRadius: '4px', 
+						padding: '6px 12px', 
+						fontSize: '13px',
+						cursor: 'pointer',
+						display: 'flex',
+						justifyContent: 'space-between',
+						alignItems: 'center'
+					}}
+				>
+					<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+						{selected || placeholder || 'Select branch'}
+					</span>
+					<svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ marginLeft: '8px' }}>
+						<path d="M3 6l5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+					</svg>
+				</div>
+				
+				{showDropdown && (
+					<div 
+						className="branch-dropdown"
+						style={{
+							position: 'absolute',
+							bottom: '100%',
+							left: 0,
+							width: '100%',
+							background: 'var(--bg-secondary)',
+							border: '1px solid var(--border)',
+							borderRadius: '4px',
+							boxShadow: '0 -4px 12px rgba(0,0,0,0.2)',
+							zIndex: 1000,
+							marginBottom: '4px',
+							display: 'flex',
+							flexDirection: 'column'
+						}}
+					>
+						<div style={{ padding: '8px', borderBottom: '1px solid var(--border)' }}>
+							<input 
+								type="text"
+								placeholder="Search branches..."
+								value={search}
+								onChange={(e) => setSearch(e.target.value)}
+								autoFocus
+								style={{
+									width: '100%',
+									background: 'var(--bg-primary)',
+									border: '1px solid var(--border)',
+									borderRadius: '2px',
+									padding: '6px 10px',
+									fontSize: '13px',
+									color: 'var(--text-primary)',
+									outline: 'none'
+								}}
+								onClick={(e) => e.stopPropagation()}
+							/>
+						</div>
+						<div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+							<div 
+								className="branch-item"
+								onClick={() => { setSelected('None'); onSelect(''); setShowDropdown(false); }}
+								style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer' }}
+							>
+								None
+							</div>
+							{filtered.map(choice => (
+								<div 
+									key={choice}
+									className={`branch-item ${selected === choice ? 'selected' : ''}`}
+									onClick={() => { setSelected(choice); onSelect(choice); setShowDropdown(false); }}
+									style={{ 
+										padding: '8px 12px', 
+										fontSize: '13px', 
+										cursor: 'pointer',
+										background: selected === choice ? 'var(--bg-active)' : 'transparent'
+									}}
+								>
+									{choice}
+								</div>
+							))}
+						</div>
+					</div>
+				)}
+			</div>
+		</div>
+	);
+};
+
 // --- Main Parsing Logic ---
 
 const parseMessageParts = (text: string): MessagePart[] => {
@@ -458,6 +567,7 @@ const parseMessageParts = (text: string): MessagePart[] => {
   const cmdRegex = /```cmd-result\n([\s\S]*?)```/g;
   const cmdProposalRegex = /\[COMMAND_PROPOSAL\]\ncommand: (.*?)\nstatus: (.*?)\nmessage: (.*?)\n\[END_COMMAND\]/g;
   const planRegex = /\[PLAN\]\n([\s\S]*?)\n\[\/PLAN\]/g;
+  const choiceRegex = /\[CHOICE\]\r?\nchoices: (.*?)\r?\nplaceholder: (.*?)\r?\ncommand: (.*?)\r?\n\[\/CHOICE\]/g;
   
   const allMatches: { index: number; end: number; part: MessagePart }[] = [];
   let match;
@@ -485,6 +595,21 @@ const parseMessageParts = (text: string): MessagePart[] => {
 		  return { text: clean, completed: clean.toLowerCase().includes('(done)') || clean.includes('✅') };
 	  });
 	  allMatches.push({ index: match.index, end: planRegex.lastIndex, part: { type: 'plan', steps } });
+  }
+  while ((match = choiceRegex.exec(text)) !== null) {
+	  try {
+		  const choices = JSON.parse(match[1]);
+		  allMatches.push({ 
+			  index: match.index, 
+			  end: choiceRegex.lastIndex, 
+			  part: { 
+				  type: 'choice', 
+				  choices, 
+				  placeholder: match[2], 
+				  command: match[3] 
+			  } 
+		  });
+	  } catch { /* ignore */ }
   }
 
   allMatches.sort((a, b) => a.index - b.index);
@@ -553,9 +678,10 @@ interface MessageProps {
  	onShowDiff?: (edit: EditProposal) => void;
 	onOpenFile?: (path: string) => void;
 	onFixCommand?: (cmd: string, output: string) => void;
+	onSelectChoice?: (choice: string, command?: string) => void;
 }
 
-export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, userEmail, onApplyEdit, onApplyMultiEdit, onRejectEdit, onRevertEdit, onShowDiff, onOpenFile, onFixCommand }) => {
+export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, userEmail, onApplyEdit, onApplyMultiEdit, onRejectEdit, onRevertEdit, onShowDiff, onOpenFile, onFixCommand, onSelectChoice }) => {
 	const isUser = message.role === 'user';
 	const [relativeTime, setRelativeTime] = React.useState(() => getRelativeTime(message.timestamp));
 	const parts = React.useMemo(() => parseMessageParts(message.text), [message.text]);
@@ -636,6 +762,7 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 							);
 						}
 						if (p.type === 'plan') return <PlanView key={idx} steps={p.steps} />;
+						if (p.type === 'choice') return <ChoiceView key={idx} choices={p.choices} placeholder={p.placeholder} onSelect={(choice) => onSelectChoice?.(choice, p.command)} />;
 						return null;
 					})}
 					{message.isStreaming && (

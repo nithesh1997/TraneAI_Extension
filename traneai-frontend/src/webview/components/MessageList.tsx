@@ -13,9 +13,10 @@ interface MessageListProps {
 	onShowDiff?: (edit: EditProposal) => void;
 	onOpenFile?: (path: string) => void;
 	onFixCommand?: (cmd: string, output: string) => void;
+	onSelectChoice?: (choice: string, command?: string) => void;
 }
 
-export const MessageList: React.FC<MessageListProps> = React.memo(({ messages, logoUri, onCopy, userEmail, onApplyEdit, onApplyMultiEdit, onRejectEdit, onRevertEdit, onShowDiff, onOpenFile, onFixCommand }) => {
+export const MessageList: React.FC<MessageListProps> = React.memo(({ messages, logoUri, onCopy, userEmail, onApplyEdit, onApplyMultiEdit, onRejectEdit, onRevertEdit, onShowDiff, onOpenFile, onFixCommand, onSelectChoice }) => {
 	const listRef = React.useRef<HTMLDivElement>(null);
 
 	React.useEffect(() => {
@@ -43,6 +44,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({ messages, l
 					onShowDiff={onShowDiff}
 					onOpenFile={onOpenFile}
 					onFixCommand={onFixCommand}
+					onSelectChoice={onSelectChoice}
 				/>
 			))}
 		</div>

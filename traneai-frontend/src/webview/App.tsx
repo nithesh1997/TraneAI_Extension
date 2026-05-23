@@ -213,6 +213,10 @@ const ChatApp: React.FC = () => {
 		vscode.postMessage({ command: 'openFile', filePath });
 	}, []);
 
+	const handleSelectChoice = useCallback((choice: string, command?: string) => {
+		vscode.postMessage({ command: command || 'selectChoice', choice });
+	}, []);
+
 	const isSidebar = document.body.classList.contains('sidebar');
 	const showRedirect = isFullScreen && isSidebar;
 
@@ -259,6 +263,7 @@ const ChatApp: React.FC = () => {
 					onShowDiff={handleShowDiff}
 					onOpenFile={handleOpenFile}
 					onFixCommand={handleFixCommand}
+					onSelectChoice={handleSelectChoice}
 				/>
 				<TypingIndicator 
 					logoUri={LOGO_URI} 
