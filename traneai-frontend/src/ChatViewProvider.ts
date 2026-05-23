@@ -584,6 +584,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		this._syncMessages();
 	}
 
+	private _getMessageText(id: string): string {
+		const msg = this._messages.find(m => m.id === id);
+		return msg ? msg.text : '';
+	}
+
 	private _updateMessageText(id: string, text: string, isStreaming = true) {
 		const msg = this._messages.find(m => m.id === id);
 		if (msg) {
@@ -1447,7 +1452,7 @@ private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: strin
 		
 		setTimeout(() => {
 			if (!workflowClosed) {
-				vscode.commands.executeCommand('simpleBrowser.api.open', url).catch(() => {
+				Promise.resolve(vscode.commands.executeCommand('simpleBrowser.api.open', url)).catch(() => {
 					vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url));
 				});
 			}
@@ -1546,6 +1551,9 @@ private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: strin
 							pushStatus(`Step 5/5 complete: Application started in external terminal.`);
 							log(`\x1b[32m  ✓ External terminal launched\x1b[0m\r\n`);
 							
+							// Explain the commits for this ticket
+							this._explainCommits(ticketId, rootPath);
+							
 							// For external terminal, we don't track the PID or capture output
 							// since it's now handled by the user in the new window.
 							return;
@@ -1559,6 +1567,9 @@ private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: strin
 						if (startProc.pid) {
 							mainProcessPid = startProc.pid;
 							log(`\x1b[32m  → Main process PID: ${mainProcessPid}\x1b[0m\r\n`);
+							
+							// Explain the commits for this ticket
+							this._explainCommits(ticketId, rootPath);
 							
 							// On Linux/Mac, also try to find the Node.js child process
 							setTimeout(() => {
@@ -1705,6 +1716,8 @@ private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: strin
 							if (code === 0) {
 								log(`\x1b[32m  ✓ Checked out ${cleanBranch}\x1b[0m\r\n`);
 								pushStatus(`Step 3/5 complete: Checked out branch **${cleanBranch}**.`);
+								// Trigger a refresh of the VS Code Git extension UI
+								vscode.commands.executeCommand('git.refresh');
 							} else {
 								log(`\x1b[33m  ⚠ Checkout had issues, continuing on current branch...\x1b[0m\r\n`);
 								pushStatus('Step 3/5 warning: Checkout had issues. Continuing on current branch.');
@@ -1731,6 +1744,88 @@ private _runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: strin
 }
 
 // Add this import at the top of the file
+
+	private async _explainCommits(ticketId: string, rootPath: string) {
+		const commitMsgId = `qa-commits-${ticketId}-${Date.now()}`;
+		this._addMessage('ai', `📝 **Changes for ${ticketId}**\n\n- Analyzing commits...`, [], commitMsgId, true);
+
+		try {
+			// Find commits matching the ticketId in the message
+			const gitLog = execSync(`git log --grep="${ticketId}" -n 5 --pretty=format:"%h %s"`, { cwd: rootPath, encoding: 'utf8' });
+			
+			if (!gitLog.trim()) {
+				// If no commits match the grep, try to get the latest 5 commits on the current branch
+				const currentBranchCommits = execSync(`git log -n 5 --pretty=format:"%h %s"`, { cwd: rootPath, encoding: 'utf8' });
+				
+				if (!currentBranchCommits.trim()) {
+					this._updateMessageText(commitMsgId, `📝 **Changes for ${ticketId}**\n\n- No recent commits found.`, false);
+					return;
+				}
+
+				this._addMessage('ai', `📝 **Recent Commits on Branch**\n\n${currentBranchCommits.split('\n').map(c => `- ${c}`).join('\n')}`, [], commitMsgId, false);
+				
+				// Get diff for these commits to explain
+				const diff = execSync(`git show -n 5 --stat`, { cwd: rootPath, encoding: 'utf8' });
+				await this._generateCommitExplanation(commitMsgId, ticketId, currentBranchCommits, diff);
+			} else {
+				this._updateMessageText(commitMsgId, `📝 **Commits for ${ticketId}**\n\n${gitLog.split('\n').map(c => `- ${c}`).join('\n')}`, false);
+				
+				// Get diff for these specific commits
+				const commitHashes = gitLog.split('\n').map(line => line.split(' ')[0]);
+				let combinedDiff = '';
+				for (const hash of commitHashes) {
+					combinedDiff += `\n--- Commit ${hash} ---\n`;
+					combinedDiff += execSync(`git show ${hash} --stat`, { cwd: rootPath, encoding: 'utf8' });
+				}
+				
+				await this._generateCommitExplanation(commitMsgId, ticketId, gitLog, combinedDiff);
+			}
+		} catch (err: any) {
+			this._updateMessageText(commitMsgId, `📝 **Changes for ${ticketId}**\n\n- ❌ Could not analyze commits: ${err.message}`, false);
+		}
+	}
+
+	private async _generateCommitExplanation(msgId: string, ticketId: string, commitList: string, diffContent: string) {
+		try {
+			const prompt = `You are a technical lead explaining code changes to a QA engineer.
+The following commits and changes were found for ticket ${ticketId}:
+
+COMMITS:
+${commitList}
+
+CHANGES (Summary):
+${diffContent.substring(0, 5000)} ${diffContent.length > 5000 ? '... (truncated)' : ''}
+
+Please provide a clear, non-technical explanation of what has changed in the application.
+Focus on:
+1. What was the goal of these changes?
+2. What specific features or UI elements were updated?
+3. What should the QA person look out for when testing?
+
+Format the response in a way that is easy to read for someone who might not be a developer. Use bullet points and bold text for emphasis.`;
+
+			const formData = new FormData();
+			formData.append('message', prompt);
+
+			const response = await fetch('http://localhost:5000/api/chat/message', {
+				method: 'POST',
+				body: formData,
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to generate explanation');
+			}
+
+			const data = await response.json();
+			const explanation = data.message || 'Could not generate explanation.';
+			
+			const currentText = this._getMessageText(msgId);
+			this._updateMessageText(msgId, `${currentText}\n\n**Summary of Changes:**\n${explanation}`, false);
+		} catch (err: any) {
+			const currentText = this._getMessageText(msgId);
+			this._updateMessageText(msgId, `${currentText}\n\n- ⚠️ Could not generate summary: ${err.message}`, false);
+		}
+	}
 
 	private async _explainTicketRequirements(ticketId: string, ticketContext?: { title?: string; description?: string; requirements?: string[] }, appUrl?: string) {
 		const reqMsgId = `qa-req-${ticketId}-${Date.now()}`;
@@ -1813,7 +1908,7 @@ Be specific and actionable. Format your response clearly using markdown.`;
 	// Use VS Code's preview HTML to force open in VS Code only
 	const openInVSCodeBrowser = () => {
 		// Method 1: Use simple browser API
-		vscode.commands.executeCommand('simpleBrowser.api.open', url).catch(() => {
+		Promise.resolve(vscode.commands.executeCommand('simpleBrowser.api.open', url)).catch(() => {
 			// Method 2: Fallback to opening in VS Code's built-in preview
 			vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url));
 		});
