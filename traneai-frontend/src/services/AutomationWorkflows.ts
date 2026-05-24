@@ -128,25 +128,31 @@ public runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: string;
 		}, 1000);
 	};
 	
-	const openUrlInBrowser = (url: string) => {
-		if (!url || workflowClosed) return;
-		
-		if (fallbackTimeout) {
-			clearTimeout(fallbackTimeout);
-			fallbackTimeout = undefined;
-		}
-		
-		log(`\r\n\x1b[32m  ✓ Opening URL in VS Code browser: ${url}\x1b[0m\r\n`);
-		pushStatus(`App detected at **${url}**. Opening in VS Code browser now.`);
-		
-		setTimeout(() => {
-			if (!workflowClosed) {
-				Promise.resolve(vscode.commands.executeCommand('simpleBrowser.api.open', url)).catch(() => {
-					vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url));
-				});
-			}
-		}, 500);
-	};
+	
+const openUrlInBrowser = (url: string) => {
+    if (!url || workflowClosed) return;
+    
+    if (fallbackTimeout) {
+        clearTimeout(fallbackTimeout);
+        fallbackTimeout = undefined;
+    }
+    
+    log(`\r\n\x1b[32m  ✓ Opening URL in VS Code browser: ${url}\x1b[0m\r\n`);
+    pushStatus(`App detected at **${url}**. Opening in VS Code browser now.`);
+    
+    setTimeout(() => {
+        if (!workflowClosed) {
+            // ONLY try VS Code browser methods - no external browser fallback
+            vscode.commands.executeCommand('simpleBrowser.api.open', url).catch((err) => {
+                log(`\x1b[33m  ⚠ Simple browser failed, trying VS Code open command...\x1b[0m\r\n`);
+                vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url)).catch((err2) => {
+                    log(`\x1b[31m  ✗ Could not open in VS Code browser: ${err2.message}\x1b[0m\r\n`);
+                    pushStatus(`⚠ Could not open browser automatically. Please open ${url} manually in VS Code.`);
+                });
+            });
+        }
+    }, 500);
+};
 
 	const pty: vscode.Pseudoterminal = {
 		onDidWrite: writeEmitter.event,
@@ -242,119 +248,231 @@ public runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: string;
 				}
 			}
 
-			const startApplication = () => {
-				pushStatus('Step 5/5: Starting the application...');
-				log(`\r\n\x1b[33m[Step 5/5] Starting the application...\x1b[0m\r\n`);
+const startApplication = () => {
+    pushStatus('Step 5/5: Starting the application...');
+    log(`\r\n\x1b[33m[Step 5/5] Starting the application...\x1b[0m\r\n`);
 
-				const scripts = packageJson.scripts || {};
-				const startCmd = scripts['dev']
-					? 'npm run dev'
-					: scripts['start']
-					? 'npm start'
-					: scripts['serve']
-					? 'npm run serve'
-					: 'npm start';
+    const scripts = packageJson.scripts || {};
+    const startCmd = scripts['dev']
+        ? 'npm run dev'
+        : scripts['start']
+        ? 'npm start'
+        : scripts['serve']
+        ? 'npm run serve'
+        : 'npm start';
 
-				log(`\x1b[32m  → Running: ${startCmd}\x1b[0m\r\n`);
-				pushStatus(`Step 5/5 in progress: Running \`${startCmd}\`.`);
+    log(`\x1b[32m  → Running: ${startCmd}\x1b[0m\r\n`);
+    pushStatus(`Step 5/5 in progress: Running \`${startCmd}\`.`);
 
-				if (process.platform === 'win32') {
-					log(`\x1b[33m  → Opening in external terminal window (Windows)...\x1b[0m\r\n`);
-					const externalCmd = `start cmd /k "cd /d "${rootPath}" && ${startCmd}"`;
-					exec(externalCmd);
-					
-					pushStatus(`Step 5/5 complete: Application started in external terminal.`);
-					log(`\x1b[32m  ✓ External terminal launched\x1b[0m\r\n`);
-					
-					this.explainCommits(ticketId, rootPath);
-					return;
-				}
+    // Function to detect the correct port from package.json or common configs
+    const getAppPort = (): number | null => {
+        // Check package.json for port configuration
+        let port = null;
+        
+        // Check for port in scripts
+        const startScript = scripts.dev || scripts.start || scripts.serve || '';
+        const portMatches = [
+            ...startScript.matchAll(/--port\s+(\d+)/g),
+            ...startScript.matchAll(/-p\s+(\d+)/g),
+            ...startScript.matchAll(/PORT=(\d+)/g),
+            ...startScript.matchAll(/port:(\d+)/g)
+        ];
+        
+        if (portMatches.length > 0) {
+            port = parseInt(portMatches[0][1]);
+            log(`\x1b[32m  → Detected port ${port} from package.json scripts\x1b[0m\r\n`);
+            return port;
+        }
+        
+        // Check for common frameworks default ports
+        const hasVite = fs.existsSync(path.join(rootPath, 'vite.config.js')) || 
+                       fs.existsSync(path.join(rootPath, 'vite.config.ts'));
+        if (hasVite) {
+            log(`\x1b[32m  → Detected Vite project (default port: 5173)\x1b[0m\r\n`);
+            return 5173;
+        }
+        
+        const hasNextJs = fs.existsSync(path.join(rootPath, 'next.config.js'));
+        if (hasNextJs) {
+            log(`\x1b[32m  → Detected Next.js project (default port: 3000)\x1b[0m\r\n`);
+            return 3000;
+        }
+        
+        const hasAngular = fs.existsSync(path.join(rootPath, 'angular.json'));
+        if (hasAngular) {
+            log(`\x1b[32m  → Detected Angular project (default port: 4200)\x1b[0m\r\n`);
+            return 4200;
+        }
+        
+        const hasReact = fs.existsSync(path.join(rootPath, 'webpack.config.js')) ||
+                        packageJson.dependencies?.react;
+        if (hasReact) {
+            log(`\x1b[32m  → Detected React project (default port: 3000)\x1b[0m\r\n`);
+            return 3000;
+        }
+        
+        // Default to 3000 for most Node.js apps
+        log(`\x1b[32m  → Using default port 3000\x1b[0m\r\n`);
+        return 3000;
+    };
 
-				log(`\x1b[33m  → Process will be tracked for cleanup on Ctrl+C\x1b[0m\r\n`);
-				const startProc = exec(startCmd, { cwd: rootPath });
-				
-				if (startProc.pid) {
-					mainProcessPid = startProc.pid;
-					log(`\x1b[32m  → Main process PID: ${mainProcessPid}\x1b[0m\r\n`);
-					this.explainCommits(ticketId, rootPath);
-					
-					setTimeout(() => {
-						try {
-							const psResult = execSync(`pgrep -P ${mainProcessPid}`, { encoding: 'utf8' });
-							const childPids = psResult.split('\n').filter(pid => pid.trim()).map(pid => parseInt(pid.trim()));
-							if (childPids.length > 0) {
-								log(`\x1b[32m  → Found child Node.js processes: ${childPids.join(', ')}\x1b[0m\r\n`);
-								mainProcessPid = childPids[0];
-							}
-						} catch (e) {}
-					}, 1000);
-				}
-				
-				let hasOpenedUrl = false;
-				let outputBuffer = '';
-				
-				const detectAndOpenUrl = (output: string) => {
-					if (hasOpenedUrl || workflowClosed) return;
-					
-					outputBuffer += output;
-					const clean = outputBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-					
-					const urlMatch = clean.match(
-						/(?:https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|(?:\d{1,3}\.){3}\d{1,3})(:\d+)(\/[^\s]*)?/i
-					);
-					
-					if (urlMatch && !detectedUrl) {
-						let url = urlMatch[0].replace(/[.,!?;:]+$/, '');
-						if (!/^https?:\/\//i.test(url)) {
-							url = `http://${url}`;
-						}
-						
-						if (url.includes('0.0.0.0')) {
-							const portMatch = url.match(/:(\d+)/);
-							if (portMatch) {
-								url = `http://localhost:${portMatch[1]}`;
-							}
-						}
-						
-						detectedUrl = url;
-						
-						if (!fallbackTimeout) {
-							fallbackTimeout = setTimeout(() => {
-								if (detectedUrl && !hasOpenedUrl && !workflowClosed) {
-									hasOpenedUrl = true;
-									openUrlInBrowser(detectedUrl);
-								}
-							}, 5000);
-						}
+    // Function to wait for the specific port to be ready
+    const waitForPort = (port: number, timeout: number = 30000): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+            const checkInterval = setInterval(() => {
+                const net = require('net');
+                const socket = new net.Socket();
+                
+                socket.setTimeout(1000);
+                
+                socket.on('connect', () => {
+                    clearInterval(checkInterval);
+                    socket.destroy();
+                    log(`\x1b[32m  ✓ Port ${port} is now listening\x1b[0m\r\n`);
+                    resolve(`http://localhost:${port}`);
+                });
+                
+                socket.on('timeout', () => {
+                    socket.destroy();
+                });
+                
+                socket.on('error', () => {
+                    socket.destroy();
+                });
+                
+                socket.connect(port, 'localhost');
+                
+                if (Date.now() - startTime > timeout) {
+                    clearInterval(checkInterval);
+                    reject(new Error(`Timeout waiting for port ${port} after ${timeout/1000} seconds`));
+                }
+            }, 1000);
+        });
+    };
 
-						const isReady = clean.toLowerCase().includes('compiled successfully') || 
-									   clean.toLowerCase().includes('ready in') ||
-									   clean.toLowerCase().includes('started successfully') ||
-									   clean.toLowerCase().includes('listening on') ||
-									   clean.toLowerCase().includes('webpack compiled');
-						
-						if (isReady && detectedUrl && !hasOpenedUrl) {
-							hasOpenedUrl = true;
-							openUrlInBrowser(detectedUrl);
-						}
-					}
-				};
+    // Start the app in external terminal (Windows) or integrated (Linux/macOS)
+    if (process.platform === 'win32') {
+        log(`\x1b[33m  → Opening in external terminal window (Windows)...\x1b[0m\r\n`);
+        const externalCmd = `start cmd /k "cd /d "${rootPath}" && ${startCmd}"`;
+        exec(externalCmd);
+        log(`\x1b[32m  ✓ External terminal launched\x1b[0m\r\n`);
+        
+        // Get the expected port
+        const expectedPort = getAppPort();
+        if (expectedPort) {
+            pushStatus(`Waiting for app to start on port ${expectedPort}...`);
+            log(`\x1b[33m  → Waiting for app to be ready on port ${expectedPort}...\x1b[0m\r\n`);
+            
+            // Wait for the port to be ready
+            waitForPort(expectedPort, 30000)
+                .then(url => {
+                    if (!workflowClosed) {
+                        detectedUrl = url;
+                        log(`\x1b[32m  ✓ App is ready at ${url}\x1b[0m\r\n`);
+                        pushStatus(`App detected at **${url}**. Opening in VS Code browser.`);
+                        setTimeout(() => {
+                            if (!workflowClosed) {
+                                openUrlInBrowser(url);
+                            }
+                        }, 1000);
+                    }
+                })
+                .catch(err => {
+                    if (!workflowClosed) {
+                        log(`\x1b[33m  ⚠ Could not detect app: ${err.message}\x1b[0m\r\n`);
+                        pushStatus(`⚠ Could not detect app on port ${expectedPort}. You may need to open the browser manually to ${expectedPort}.`);
+                    }
+                });
+        } else {
+            pushStatus(`⚠ Could not determine app port. You may need to open the browser manually.`);
+        }
+        
+        this.explainCommits(ticketId, rootPath);
+        return;
+    } else {
+        // Linux/macOS: Use integrated terminal with tracking
+        log(`\x1b[33m  → Starting with integrated terminal tracking...\x1b[0m\r\n`);
+        const startProc = exec(startCmd, { cwd: rootPath });
+        
+        if (startProc.pid) {
+            mainProcessPid = startProc.pid;
+            log(`\x1b[32m  → Main process PID: ${mainProcessPid}\x1b[0m\r\n`);
+        }
+        
+        let hasOpenedUrl = false;
+        let outputBuffer = '';
+        
+        const detectAndOpenUrl = (output: string) => {
+            if (hasOpenedUrl || workflowClosed) return;
+            
+            outputBuffer += output;
+            const clean = outputBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+            
+            // Look for port patterns specifically
+            const portMatch = clean.match(/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)[:\s]+(\d{4,5})/i);
+            let url = null;
+            
+            if (portMatch) {
+                const port = portMatch[1];
+                url = `http://localhost:${port}`;
+            } else {
+                // Fallback to standard port patterns
+                const urlMatch = clean.match(
+                    /(?:https?:\/\/)?(localhost|127\.0\.0\.1)(:\d{4,5})(?:\/[^\s]*)?/i
+                );
+                if (urlMatch) {
+                    url = urlMatch[0].startsWith('http') ? urlMatch[0] : `http://${urlMatch[0]}`;
+                }
+            }
+            
+            if (url && !detectedUrl) {
+                detectedUrl = url;
+                
+                if (!fallbackTimeout) {
+                    fallbackTimeout = setTimeout(() => {
+                        if (detectedUrl && !hasOpenedUrl && !workflowClosed) {
+                            hasOpenedUrl = true;
+                            openUrlInBrowser(detectedUrl);
+                        }
+                    }, 5000);
+                }
 
-				startProc.stdout?.on('data', (d) => {
-					const text = d.toString();
-					log(text);
-					detectAndOpenUrl(text);
-				});
-				startProc.stderr?.on('data', (d) => {
-					const text = d.toString();
-					log(text);
-					detectAndOpenUrl(text);
-				});
-				startProc.on('error', (err) => {
-					log(`\r\n\x1b[31m  ✗ Start failed: ${err.message}\x1b[0m\r\n`);
-					pushStatus(`Step 5/5 failed: ${err.message}`);
-				});
-			};
+                const isReady = clean.toLowerCase().includes('compiled successfully') || 
+                               clean.toLowerCase().includes('ready in') ||
+                               clean.toLowerCase().includes('started successfully') ||
+                               clean.toLowerCase().includes('listening on') ||
+                               clean.toLowerCase().includes('webpack compiled') ||
+                               clean.toLowerCase().includes('server running');
+                
+                if (isReady && detectedUrl && !hasOpenedUrl) {
+                    hasOpenedUrl = true;
+                    openUrlInBrowser(detectedUrl);
+                }
+            }
+        };
+        
+        startProc.stdout?.on('data', (d) => {
+            const text = d.toString();
+            log(text);
+            detectAndOpenUrl(text);
+        });
+        
+        startProc.stderr?.on('data', (d) => {
+            const text = d.toString();
+            log(text);
+            detectAndOpenUrl(text);
+        });
+        
+        startProc.on('error', (err) => {
+            log(`\r\n\x1b[31m  ✗ Start failed: ${err.message}\x1b[0m\r\n`);
+            pushStatus(`Step 5/5 failed: ${err.message}`);
+        });
+        
+        this.explainCommits(ticketId, rootPath);
+        return;
+    }
+};
 
 			const checkDependenciesAndContinue = () => {
 				pushStatus('Step 4/5: Checking whether dependencies are already installed...');
