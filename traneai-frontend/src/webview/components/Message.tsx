@@ -13,7 +13,8 @@ type MessagePart =
   | { type: 'editProposal'; edit: EditProposal }
   | { type: 'multiEditProposal'; edits: EditProposal[] }
   | { type: 'plan'; steps: { text: string; completed: boolean }[] }
-  | { type: 'choice'; choices: string[]; placeholder?: string; command?: string };
+  | { type: 'choice'; choices: string[]; placeholder?: string; command?: string }
+  | { type: 'consoleLogs'; logs: { type: string; text: string }[] };
 
 // --- Helpers ---
 
@@ -456,6 +457,69 @@ const PlanView: React.FC<{ steps: { text: string; completed: boolean }[] }> = ({
 	);
 };
 
+const ConsoleLogsView: React.FC<{ logs: { type: string, text: string }[] }> = ({ logs }) => {
+	return (
+		<div className="console-logs-container animated-pop" style={{
+			background: '#1e1e1e',
+			borderRadius: '8px',
+			border: '1px solid var(--border)',
+			margin: '10px 0',
+			overflow: 'hidden',
+			fontFamily: 'monospace',
+			fontSize: '12px'
+		}}>
+			<div className="console-header" style={{
+				background: 'var(--bg-tertiary)',
+				padding: '6px 12px',
+				color: 'var(--text-muted)',
+				fontSize: '11px',
+				fontWeight: 600,
+				textTransform: 'uppercase',
+				display: 'flex',
+				justifyContent: 'space-between',
+				borderBottom: '1px solid var(--border)'
+			}}>
+				<span>Application Console</span>
+				<span>{logs.length} messages</span>
+			</div>
+			<div className="console-body" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+				{logs.map((log, i) => {
+					let icon = 'ℹ️';
+					let color = '#ccc';
+					let bg = 'transparent';
+					
+					if (log.type === 'error') {
+						icon = '❌';
+						color = '#f85149';
+						bg = 'rgba(248, 81, 73, 0.05)';
+					} else if (log.type === 'warning') {
+						icon = '⚠️';
+						color = '#d29922';
+						bg = 'rgba(210, 153, 34, 0.05)';
+					} else if (log.type === 'debug' || log.type === 'verbose') {
+						icon = '🔍';
+						color = '#8b949e';
+					}
+
+					return (
+						<div key={i} style={{
+							display: 'flex',
+							gap: '8px',
+							padding: '4px 12px',
+							borderBottom: '1px solid rgba(255,255,255,0.05)',
+							background: bg,
+							lineHeight: '1.4'
+						}}>
+							<span style={{ flexShrink: 0, width: '16px' }}>{icon}</span>
+							<span style={{ color: color, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{log.text}</span>
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+};
+
 const ChoiceView: React.FC<{
 	choices: string[];
 	placeholder?: string;
@@ -575,6 +639,7 @@ const parseMessageParts = (text: string): MessagePart[] => {
   const cmdProposalRegex = /\[COMMAND_PROPOSAL\]\ncommand: (.*?)\nstatus: (.*?)\nmessage: (.*?)\n\[END_COMMAND\]/g;
   const planRegex = /\[PLAN\]\n([\s\S]*?)\n\[\/PLAN\]/g;
   const choiceRegex = /\[CHOICE\]\r?\nchoices: (.*?)\r?\nplaceholder: (.*?)\r?\ncommand: (.*?)\r?\n\[\/CHOICE\]/g;
+  const consoleRegex = /\[CONSOLE (.*?)\]\n([\s\S]*?)(?=\n\n|\n\[|$)/g;
   
   const allMatches: { index: number; end: number; part: MessagePart }[] = [];
   let match;
@@ -618,6 +683,17 @@ const parseMessageParts = (text: string): MessagePart[] => {
 		  });
 	  } catch { /* ignore */ }
   }
+  while ((match = consoleRegex.exec(text)) !== null) {
+      const logLines = match[2].split('\n').filter(Boolean);
+      const logs = logLines.map(line => {
+          const typeMatch = line.match(/^(\w+): (.*)/);
+          if (typeMatch) {
+              return { type: typeMatch[1].toLowerCase(), text: typeMatch[2] };
+          }
+          return { type: 'log', text: line };
+      });
+      allMatches.push({ index: match.index, end: consoleRegex.lastIndex, part: { type: 'consoleLogs', logs } });
+  }
 
   allMatches.sort((a, b) => a.index - b.index);
   let lastIndex = 0;
@@ -658,7 +734,7 @@ export interface Attachment {
 	name: string;
 	path?: string;
 	file?: File;
-	type: 'file' | 'terminal' | 'image' | 'diff' | 'folder' | 'url';
+	type: 'file' | 'terminal' | 'image' | 'diff' | 'folder' | 'url' | 'console';
 	imageData?: string;
 	mimeType?: string;
 	isPinned?: boolean;
@@ -769,6 +845,7 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 						}
 						if (p.type === 'plan') return <PlanView key={idx} steps={p.steps} />;
 						if (p.type === 'choice') return <ChoiceView key={idx} choices={p.choices} placeholder={p.placeholder} onSelect={(choice) => onSelectChoice?.(choice, p.command)} />;
+						if (p.type === 'consoleLogs') return <ConsoleLogsView key={idx} logs={p.logs} />;
 						return null;
 					})}
 					{message.isStreaming && (

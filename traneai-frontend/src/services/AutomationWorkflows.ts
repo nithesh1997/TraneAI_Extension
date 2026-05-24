@@ -255,13 +255,20 @@ const startApplication = () => {
     log(`\r\n\x1b[33m[Step 5/5] Starting the application...\x1b[0m\r\n`);
 
     const scripts = packageJson.scripts || {};
-    const startCmd = scripts['dev']
-        ? 'npm run dev'
-        : scripts['start']
-        ? 'npm start'
-        : scripts['serve']
-        ? 'npm run serve'
-        : 'npm start';
+    let startCmd = scripts['dev']
+	? 'npm run dev'
+	: scripts['start']
+	? 'npm start'
+	: scripts['serve']
+	? 'npm run serve'
+	: 'npm start';
+
+	// Prevent apps from opening external browser
+	if (process.platform === 'win32') {
+	startCmd = `set BROWSER=none && ${startCmd}`;
+	} else {
+	startCmd = `BROWSER=none ${startCmd}`;
+	}
 
     log(`\x1b[32m  → Running: ${startCmd}\x1b[0m\r\n`);
     pushStatus(`Step 5/5 in progress: Running \`${startCmd}\`.`);

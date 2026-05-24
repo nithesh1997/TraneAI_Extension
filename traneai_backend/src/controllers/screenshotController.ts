@@ -16,6 +16,11 @@ export async function takeScreenshot(req: Request, res: Response): Promise<void>
     });
     const page = await browser.newPage();
     
+    const consoleLogs: { type: string, text: string }[] = [];
+    page.on('console', msg => {
+      consoleLogs.push({ type: msg.type(), text: msg.text() });
+    });
+    
     // Set viewport size
     await page.setViewport({ width: 1280, height: 800 });
     
@@ -27,7 +32,8 @@ export async function takeScreenshot(req: Request, res: Response): Promise<void>
 
     res.json({ 
       image: screenshot,
-      url: url
+      url: url,
+      logs: consoleLogs
     });
   } catch (error: any) {
     console.error('Screenshot error:', error);

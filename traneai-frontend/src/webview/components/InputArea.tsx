@@ -94,6 +94,9 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	const [showFolderDropdown, setShowFolderDropdown] = useState(false);
 	const [mentionQuery, setMentionQuery] = useState('');
 	const [activeBrowserUrl, setActiveBrowserUrl] = useState<string | undefined>(undefined);
+	const [consoleLogs, setConsoleLogs] = useState<{ type: string, text: string }[]>([]);
+	const [showConsoleDropdown, setShowConsoleDropdown] = useState(false);
+	const [selectedConsoleFilter, setSelectedConsoleFilter] = useState<string | null>(null);
 
 	// Fetch workspace files and folders
 	useEffect(() => {
@@ -102,7 +105,10 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			if (message.type === 'browserUrl') {
 				setActiveBrowserUrl(message.value);
 			} else if (message.type === 'snapshotResult') {
-				const { image, url } = message;
+				const { image, url, logs } = message;
+				if (logs) {
+					setConsoleLogs(logs);
+				}
 				const snapshotAttachment: Attachment = {
 					name: `snapshot-${Date.now()}.png`,
 					path: url,
@@ -278,11 +284,40 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			finalChatText = finalChatText ? `${finalChatText}\n\n${codeBlockText}` : codeBlockText;
 		}
 
+		// Append URL attachments to the message so the AI can see them
+		const urlAttachments = attachedFiles.filter(f => f.type === 'url' && f.path);
+		if (urlAttachments.length > 0) {
+			const urlText = urlAttachments.map(f => `URL: ${f.path}`).join('\n');
+			finalChatText = finalChatText ? `${finalChatText}\n\n${urlText}` : urlText;
+		}
+
+		// Append filtered console logs if console attachment is present
+		const consoleAttachment = attachedFiles.find(f => f.type === 'console');
+		if (consoleAttachment && consoleAttachment.path && consoleLogs.length > 0) {
+			const filterId = consoleAttachment.path;
+			const filteredLogs = filterId === 'all' 
+				? consoleLogs 
+				: consoleLogs.filter(l => {
+					if (filterId === 'error') return l.type === 'error';
+					if (filterId === 'warning') return l.type === 'warning';
+					if (filterId === 'info') return l.type === 'info' || l.type === 'log';
+					if (filterId === 'verbose') return l.type === 'debug' || l.type === 'verbose';
+					return false;
+				});
+			
+			if (filteredLogs.length > 0) {
+				const logsText = `[CONSOLE ${filterId.toUpperCase()}]\n` + filteredLogs.map(l => `${l.type.toUpperCase()}: ${l.text}`).join('\n');
+				finalChatText = finalChatText ? `${finalChatText}\n\n${logsText}` : logsText;
+			}
+		}
+
 		const pinnedFiles = attachedFiles.filter(f => f.isPinned).map(f => f.path).filter(Boolean) as string[];
 		onSendMessage(finalChatText, currentModel, attachedFiles, pinnedFiles);
 		
 		setText('');
 		setCodeBlocks([]);
+		setConsoleLogs([]);
+		setSelectedConsoleFilter(null);
 		
 		// Keep only pinned files for the next message
 		const nextAttachedFiles = attachedFiles.filter(f => f.isPinned);
@@ -391,6 +426,10 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	};
 
 	const removeFile = (index: number) => {
+		const fileToRemove = attachedFiles[index];
+		if (fileToRemove.type === 'console') {
+			setSelectedConsoleFilter(null);
+		}
 		const updatedFiles = attachedFiles.filter((_, i) => i !== index);
 		setAttachedFiles(updatedFiles);
 		onFilesSelected(updatedFiles.map(f => f.name));
@@ -444,6 +483,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			if (!target.closest('.skills-selector')) setShowSkillsDropdown(false);
 			if (!target.closest('.attachment-selector')) setShowAttachmentDropdown(false);
 			if (!target.closest('.branch-selector-custom')) setShowBranchDropdown(false);
+			if (!target.closest('.console-selector')) setShowConsoleDropdown(false);
 			if (!target.closest('.context-dropdown')) {
 				setShowContextDropdown(false);
 				setShowFileDropdown(false);
@@ -505,6 +545,11 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 										<path d="M7.5 13.5h7.5" stroke="currentColor" strokeWidth="1.2" />
 										<circle cx="11.5" cy="4.5" r="1.5" stroke="currentColor" strokeWidth="1.2" />
 										<path d="M10 2.5a4 4 0 012.828 1.172l2 2a4 4 0 010 5.656l-2 2A4 4 0 0110 14.5m-4-13a4 4 0 00-2.828 1.172l-2 2a4 4 0 000 5.656l2 2A4 4 0 006 14.5" stroke="currentColor" strokeWidth="1.2" />
+									</svg>
+								) : file.type === 'console' ? (
+									<svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ color: '#d29922' }}>
+										<path d="M2 4h12v8H2V4z" stroke="currentColor" strokeWidth="1.2" />
+										<path d="M4 8h1M6 8h3" stroke="currentColor" strokeWidth="1.2" />
 									</svg>
 								) : (
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
@@ -796,6 +841,61 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 								</div>
 							)}
 						</div>
+
+						{activeBrowserUrl && (
+							<div className="console-selector" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+								<button 
+									className={`icon-btn ${showConsoleDropdown ? 'active' : ''}`}
+									title="Console Filters"
+									onClick={(e) => { e.stopPropagation(); setShowConsoleDropdown(!showConsoleDropdown); }}
+									style={{ padding: '5px 7px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+								>
+									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+										<path d="M2 4h12v8H2V4z" stroke="currentColor" strokeWidth="1.2" />
+										<path d="M4 8h1M6 8h3" stroke="currentColor" strokeWidth="1.2" />
+									</svg>
+									Console
+								</button>
+								{showConsoleDropdown && (
+									<div className="dropdown-menu show" style={{ bottom: '100%', left: 0, marginBottom: '8px', minWidth: '150px' }}>
+										<div className="dropdown-label">Console Filters</div>
+										{[
+											{ id: 'all', label: 'Messages', icon: '📋', color: 'var(--text-primary)' },
+											{ id: 'error', label: 'Errors', icon: '❌', color: '#f85149' },
+											{ id: 'warning', label: 'Warnings', icon: '⚠️', color: '#d29922' },
+											{ id: 'info', label: 'Info', icon: 'ℹ️', color: '#58a6ff' },
+											{ id: 'verbose', label: 'Verbose', icon: '🔍', color: '#8b949e' }
+										].map(filter => (
+											<div 
+												key={filter.id} 
+												className={`dropdown-item ${selectedConsoleFilter === filter.id ? 'selected' : ''}`}
+												onClick={() => {
+													setSelectedConsoleFilter(filter.id);
+													setShowConsoleDropdown(false);
+													
+													// Add/Replace console attachment
+													const consoleAttachment: Attachment = {
+														name: `Console: ${filter.label}`,
+														path: filter.id,
+														type: 'console'
+													};
+													
+													setAttachedFiles(prev => {
+														const filtered = prev.filter(f => f.type !== 'console');
+														return [...filtered, consoleAttachment];
+													});
+												}}
+												style={{ display: 'flex', alignItems: 'center', gap: '10px' }}
+											>
+												<span style={{ fontSize: '14px', width: '16px', textAlign: 'center', color: filter.color }}>{filter.icon}</span>
+												<span style={{ color: selectedConsoleFilter === filter.id ? 'var(--accent)' : 'inherit' }}>{filter.label}</span>
+												{selectedConsoleFilter === filter.id && <span className="item-check" style={{ marginLeft: 'auto' }}>✓</span>}
+											</div>
+										))}
+									</div>
+								)}
+							</div>
+						)}
 					</div>
 
 					<div className="right-controls">

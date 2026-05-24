@@ -31,12 +31,14 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
             }
             provider.addMessage('user', data.text, data.attachments);
 
+            const hasConsoleAttachment = (data.attachments || []).some((a: any) => a.type === 'console');
+
             if (data.text.includes('@comprehensive-review')) {
                 provider.automationWorkflows.runComprehensiveReview();
                 return;
             }
 
-            if (data.model === 'qa' && data.text.includes('@research')) {
+            if (data.model === 'qa' && data.text.includes('@research') && !hasConsoleAttachment) {
                 const ticketMatch = data.text.match(/@research\s+(?:Branch:\s*)?([A-Za-z0-9\-_./]+)/i);
                 if (ticketMatch) {
                     provider.automationWorkflows.runQAResearchWorkflow(ticketMatch[1]);
