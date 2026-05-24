@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { handleChatMessage, handleQuickAction } from '../controllers/chatController.js';
+import { takeScreenshot } from '../controllers/screenshotController.js';
 
 const router = express.Router();
 
@@ -68,6 +69,37 @@ router.post('/message', upload.array('images'), handleChatMessage);
  *               $ref: '#/components/schemas/QuickActionResponse'
  */
 router.post('/quick-action', handleQuickAction);
+
+/**
+ * @swagger
+ * /api/chat/screenshot:
+ *   post:
+ *     summary: Take a screenshot of a URL
+ *     tags:
+ *       - Chat
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               url:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Screenshot image
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 image:
+ *                   type: string
+ *                 url:
+ *                   type: string
+ */
+router.post('/screenshot', takeScreenshot);
 
 export default router;
 

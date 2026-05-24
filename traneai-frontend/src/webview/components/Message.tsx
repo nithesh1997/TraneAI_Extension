@@ -658,7 +658,7 @@ export interface Attachment {
 	name: string;
 	path?: string;
 	file?: File;
-	type: 'file' | 'terminal' | 'image' | 'diff' | 'folder';
+	type: 'file' | 'terminal' | 'image' | 'diff' | 'folder' | 'url';
 	imageData?: string;
 	mimeType?: string;
 	isPinned?: boolean;

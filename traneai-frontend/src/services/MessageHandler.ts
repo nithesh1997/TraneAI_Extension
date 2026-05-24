@@ -149,5 +149,39 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                 }
             }
             break;
+        case 'openUrl':
+            if (data.url) {
+                vscode.commands.executeCommand('simpleBrowser.api.open', data.url).catch(() => {
+                    vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(data.url));
+                });
+            }
+            break;
+        case 'takeSnapshot':
+            if (provider.activeBrowserUrl) {
+                provider.broadcastTyping(true);
+                fetch('http://localhost:5000/api/chat/screenshot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: provider.activeBrowserUrl })
+                })
+                .then(res => res.json())
+                .then(result => {
+                    provider.broadcastTyping(false);
+                    if (result.image) {
+                        provider.postMessageToWebview({
+                            type: 'snapshotResult',
+                            image: result.image,
+                            url: result.url
+                        });
+                    } else if (result.error) {
+                        vscode.window.showErrorMessage(`Snapshot failed: ${result.error}`);
+                    }
+                })
+                .catch(err => {
+                    provider.broadcastTyping(false);
+                    vscode.window.showErrorMessage(`Snapshot error: ${err.message}`);
+                });
+            }
+            break;
     }
 }

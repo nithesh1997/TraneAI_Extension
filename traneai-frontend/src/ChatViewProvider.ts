@@ -20,6 +20,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 	private _panel?: vscode.WebviewPanel;
 	private _isFullScreenActive = false;
 	private _messages: SessionMessage[] = [];
+	private _activeBrowserUrl: string | undefined;
 	private _streamInterval?: ReturnType<typeof setInterval>;
 	public abortController?: AbortController;
 
@@ -96,8 +97,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 		const sessions = this.loadSessionList();
 		const workspaceOpen = !!vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0;
 		const msg = { type: 'historyList', sessions, currentSessionId: this.currentSessionId, workspaceOpen };
-		if (this._view) { this._view.webview.postMessage(msg); }
-		if (this._panel) { this._panel.webview.postMessage(msg); }
+		this.postMessageToWebview(msg);
 		this.syncMessages();
 	}
 
@@ -130,13 +130,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 		});
 
 		this.broadcastHistoryList();
+		this.broadcastBrowserUrl();
 	}
 
 	public setFullScreen(value: boolean) {
 		this._isFullScreenActive = value;
-		if (this._view) {
-			this._view.webview.postMessage({ type: 'setFullScreen', value });
-		}
+		this.postMessageToWebview({ type: 'setFullScreen', value });
 		if (!value && this._panel) {
 			this._panel.dispose();
 		}
@@ -157,8 +156,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 
 	public broadcastTyping(isTyping: boolean) {
 		const msg = { type: 'typing', value: isTyping };
-		if (this._view) { this._view.webview.postMessage(msg); }
-		if (this._panel) { this._panel.webview.postMessage(msg); }
+		this.postMessageToWebview(msg);
+	}
+
+	public get activeBrowserUrl(): string | undefined {
+		return this._activeBrowserUrl;
+	}
+
+	public set activeBrowserUrl(url: string | undefined) {
+		this._activeBrowserUrl = url;
+		this.broadcastBrowserUrl();
+	}
+
+	public broadcastBrowserUrl() {
+		const msg = { type: 'browserUrl', value: this._activeBrowserUrl };
+		this.postMessageToWebview(msg);
+	}
+
+	public postMessageToWebview(message: any) {
+		if (this._view) { this._view.webview.postMessage(message); }
+		if (this._panel) { this._panel.webview.postMessage(message); }
 	}
 
 	public addMessage(role: 'user' | 'ai', text: string, attachments: any[] = [], id: string = `msg-${Date.now()}`, isStreaming = false) {
@@ -198,8 +215,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 			workspaceOpen, 
 			workspaceRoot 
 		};
-		if (this._view) { this._view.webview.postMessage(message); }
-		if (this._panel) { this._panel.webview.postMessage(message); }
+		this.postMessageToWebview(message);
 	}
 
 	public renderFullScreen(): vscode.WebviewPanel {

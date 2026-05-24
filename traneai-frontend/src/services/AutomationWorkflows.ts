@@ -103,6 +103,7 @@ public runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: string;
 		}
 		workflowClosed = true;
 		pushStatus(reason);
+		this.provider.activeBrowserUrl = undefined;
 		
 		log(`\x1b[33m⏹️ Stopping workflow and killing all processes...\x1b[0m\r\n`);
 		
@@ -139,6 +140,7 @@ const openUrlInBrowser = (url: string) => {
     
     log(`\r\n\x1b[32m  ✓ Opening URL in VS Code browser: ${url}\x1b[0m\r\n`);
     pushStatus(`App detected at **${url}**. Opening in VS Code browser now.`);
+    this.provider.activeBrowserUrl = url;
     
     setTimeout(() => {
         if (!workflowClosed) {

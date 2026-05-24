@@ -93,6 +93,34 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	const [showFileDropdown, setShowFileDropdown] = useState(false);
 	const [showFolderDropdown, setShowFolderDropdown] = useState(false);
 	const [mentionQuery, setMentionQuery] = useState('');
+	const [activeBrowserUrl, setActiveBrowserUrl] = useState<string | undefined>(undefined);
+
+	// Fetch workspace files and folders
+	useEffect(() => {
+		const handleMessage = (event: MessageEvent) => {
+			const message = event.data;
+			if (message.type === 'browserUrl') {
+				setActiveBrowserUrl(message.value);
+			} else if (message.type === 'snapshotResult') {
+				const { image, url } = message;
+				const snapshotAttachment: Attachment = {
+					name: `snapshot-${Date.now()}.png`,
+					path: url,
+					type: 'image',
+					imageData: image,
+					mimeType: 'image/png'
+				};
+				const urlAttachment: Attachment = {
+					name: url,
+					path: url,
+					type: 'url'
+				};
+				setAttachedFiles(prev => [...prev, snapshotAttachment, urlAttachment]);
+			}
+		};
+		window.addEventListener('message', handleMessage);
+		return () => window.removeEventListener('message', handleMessage);
+	}, []);
 
 	// Fetch workspace files and folders
 	useEffect(() => {
@@ -471,13 +499,28 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
 										<path d="M1.5 3.5a1 1 0 011-1h4l1.5 1.5h6.5a1 1 0 011 1v7a1 1 0 01-1 1h-12a1 1 0 01-1-1v-8.5z" stroke="currentColor" strokeWidth="1.2" />
 									</svg>
+								) : file.type === 'url' ? (
+									<svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ color: '#007acc' }}>
+										<path d="M4.5 10.5h2.25l4.5-4.5-2.25-2.25-4.5 4.5V10.5z" stroke="currentColor" strokeWidth="1.2" />
+										<path d="M7.5 13.5h7.5" stroke="currentColor" strokeWidth="1.2" />
+										<circle cx="11.5" cy="4.5" r="1.5" stroke="currentColor" strokeWidth="1.2" />
+										<path d="M10 2.5a4 4 0 012.828 1.172l2 2a4 4 0 010 5.656l-2 2A4 4 0 0110 14.5m-4-13a4 4 0 00-2.828 1.172l-2 2a4 4 0 000 5.656l2 2A4 4 0 006 14.5" stroke="currentColor" strokeWidth="1.2" />
+									</svg>
 								) : (
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
 										<path d="M3 3h10v10H3V3z" stroke="currentColor" strokeWidth="1.2" />
 										<path d="M7 3v10M3 7h10" stroke="currentColor" strokeWidth="1.2" />
 									</svg>
 								)}
-								<span className="file-name">
+								<span 
+									className="file-name"
+									onClick={() => {
+										if (file.type === 'url' && file.path) {
+											vscode.postMessage({ command: 'openUrl', url: file.path });
+										}
+									}}
+									style={file.type === 'url' ? { color: '#007acc', cursor: 'pointer', textDecoration: 'underline' } : {}}
+								>
 									{file.name}
 									{file.type === 'terminal' && <div className="chip-tooltip">{file.path}</div>}
 								</span>
@@ -756,6 +799,33 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 					</div>
 
 					<div className="right-controls">
+						{activeBrowserUrl && (
+							<button 
+								className="snapshot-btn" 
+								onClick={() => vscode.postMessage({ command: 'takeSnapshot' })}
+								title="Take snapshot of current browser view"
+								style={{
+									background: '#f85149',
+									color: 'white',
+									border: 'none',
+									borderRadius: '4px',
+									padding: '4px 8px',
+									fontSize: '11px',
+									fontWeight: 600,
+									cursor: 'pointer',
+									display: 'flex',
+									alignItems: 'center',
+									gap: '4px',
+									marginRight: '8px'
+								}}
+							>
+								<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+									<path d="M13 3H3a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2z" stroke="currentColor" strokeWidth="1.2" />
+									<circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.2" />
+								</svg>
+								SnapShot View
+							</button>
+						)}
 						{isTyping ? (
 							<button className="stop-btn" id="stop-btn" onClick={onStopGeneration} title="Stop generating">
 								<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
