@@ -44,42 +44,46 @@ export class ConsoleService {
 
     private setupWorkspaceDiagnostics() {
         vscode.languages.onDidChangeDiagnostics((e) => {
-            for (const uri of e.uris) {
-                const diagnostics = vscode.languages.getDiagnostics(uri);
-                this.updateDiagnosticsForUri(uri, diagnostics);
-            }
+            this.refreshAllDiagnostics();
         });
 
         // Initial capture
-        vscode.workspace.textDocuments.forEach(doc => {
-            const diagnostics = vscode.languages.getDiagnostics(doc.uri);
-            this.updateDiagnosticsForUri(doc.uri, diagnostics);
-        });
+        this.refreshAllDiagnostics();
     }
 
-    private updateDiagnosticsForUri(uri: vscode.Uri, diagnostics: vscode.Diagnostic[]) {
-        // Remove existing workspace logs for this URI
-        this._logs = this._logs.filter(log => log.source !== LogSource.Workspace || log.file !== uri.fsPath);
+    private refreshAllDiagnostics() {
+        const allDiagnostics = vscode.languages.getDiagnostics();
+        
+        // Remove all existing workspace logs
+        this._logs = this._logs.filter(log => log.source !== LogSource.Workspace);
 
-        diagnostics.forEach(diag => {
-            let level = LogLevel.Info;
-            if (diag.severity === vscode.DiagnosticSeverity.Error) level = LogLevel.Error;
-            if (diag.severity === vscode.DiagnosticSeverity.Warning) level = LogLevel.Warning;
-            if (diag.severity === vscode.DiagnosticSeverity.Information) level = LogLevel.Info;
-            if (diag.severity === vscode.DiagnosticSeverity.Hint) level = LogLevel.Verbose;
+        allDiagnostics.forEach(([uri, diagnostics]) => {
+            diagnostics.forEach(diag => {
+                let level = LogLevel.Info;
+                if (diag.severity === vscode.DiagnosticSeverity.Error) level = LogLevel.Error;
+                if (diag.severity === vscode.DiagnosticSeverity.Warning) level = LogLevel.Warning;
+                if (diag.severity === vscode.DiagnosticSeverity.Information) level = LogLevel.Info;
+                if (diag.severity === vscode.DiagnosticSeverity.Hint) level = LogLevel.Verbose;
 
-            this._logs.push({
-                id: Math.random().toString(36).substr(2, 9),
-                timestamp: Date.now(),
-                source: LogSource.Workspace,
-                level,
-                message: diag.message,
-                file: uri.fsPath,
-                line: diag.range.start.line + 1,
-                column: diag.range.start.character + 1,
-                count: 1
+                this._logs.push({
+                    id: Math.random().toString(36).substr(2, 9),
+                    timestamp: Date.now(),
+                    source: LogSource.Workspace,
+                    level,
+                    message: diag.message,
+                    file: uri.fsPath,
+                    line: diag.range.start.line + 1,
+                    column: diag.range.start.character + 1,
+                    count: 1
+                });
             });
         });
+        
+        // Keep last 1000 logs (Workspace logs + Runtime logs)
+        if (this._logs.length > 1000) {
+            this._logs = this._logs.slice(-1000);
+        }
+
         this._onDidUpdateLogs.fire(this._logs);
     }
 
