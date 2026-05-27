@@ -157,6 +157,22 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
         return date.toLocaleTimeString('en-GB', { hour12: false });
     };
 
+    const getDisplayPath = (fullPath?: string) => {
+        if (!fullPath) return '';
+        const parts = fullPath.split(/[\\/]/);
+        const srcIndex = parts.findIndex(p => p.toLowerCase() === 'src');
+        if (srcIndex !== -1) {
+            return parts.slice(srcIndex).join('\\');
+        }
+        // If no src, try to show from project folder (usually after 'workspace')
+        const workspaceIndex = parts.findIndex(p => p.toLowerCase() === 'workspace');
+        if (workspaceIndex !== -1 && workspaceIndex < parts.length - 1) {
+            return parts.slice(workspaceIndex + 1).join('\\');
+        }
+        // Fallback to last 2 segments if path is long
+        return parts.length > 2 ? parts.slice(-2).join('\\') : fullPath;
+    };
+
     const handleRunExpression = () => {
         if (expression.trim() && onExecuteExpression) {
             onExecuteExpression(expression);
@@ -355,20 +371,51 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
                                             />
                                             <span className="log-timestamp">{formatTimestamp(log.timestamp)}</span>
                                             <span className="log-icon">{levelIcon(log.level)}</span>
-                                            <span className="log-message" title={log.message}>
-                                                {log.message}
-                                                {log.count > 1 && (
-                                                    <Badge
-                                                        count={log.count}
-                                                        size="small"
-                                                        color="var(--text-muted)"
-                                                        style={{ marginLeft: 8 }}
-                                                    />
-                                                )}
-                                            </span>
-                                            <span className="log-location">
-                                                {log.file ? `${log.file.split(/[\\/]/).pop()}:${log.line}` : ''}
-                                            </span>
+                                            <Tooltip
+                                                title={
+                                                    <div style={{ padding: '6px 4px' }}>
+                                                        <div style={{ marginBottom: log.file ? 10 : 0, fontWeight: 500, lineHeight: 1.4 }}>{log.message}</div>
+                                                        {log.file && (
+                                                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 8 }}>
+                                                                <div style={{ color: 'var(--text-secondary)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, fontWeight: 600 }}>Location</div>
+                                                                <div style={{ 
+                                                                    fontFamily: 'var(--font-mono)', 
+                                                                    fontSize: '11px', 
+                                                                    color: 'var(--accent)',
+                                                                    backgroundColor: 'rgba(0,0,0,0.2)',
+                                                                    padding: '4px 6px',
+                                                                    borderRadius: '4px',
+                                                                    wordBreak: 'break-all',
+                                                                    lineHeight: 1.5
+                                                                }}>
+                                                                    {getDisplayPath(log.file)}:{log.line}{log.column ? `:${log.column}` : ''}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                }
+                                                placement="topLeft"
+                                                mouseEnterDelay={0.3}
+                                            >
+                                                <span className="log-message">
+                                                    {log.message}
+                                                    {log.count > 1 && (
+                                                        <Badge
+                                                            count={log.count}
+                                                            size="small"
+                                                            color="var(--text-muted)"
+                                                            style={{ marginLeft: 8 }}
+                                                        />
+                                                    )}
+                                                </span>
+                                            </Tooltip>
+                                            {log.file && (
+                                                <Tooltip title={`${getDisplayPath(log.file)}:${log.line}`} placement="left">
+                                                    <span className="log-location">
+                                                        {`${log.file.split(/[\\/]/).pop()}:${log.line}`}
+                                                    </span>
+                                                </Tooltip>
+                                            )}
                                         </div>
                                     ),
                                     children: (
