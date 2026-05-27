@@ -22,7 +22,6 @@ import {
     InfoCircleFilled,
     CheckCircleFilled,
     RightOutlined,
-    ThunderboltOutlined,
     PlayCircleOutlined,
 } from '@ant-design/icons';
 
@@ -60,6 +59,7 @@ interface ConsolePanelProps {
     filter?: string;
     onFilterChange?: (filter: string) => void;
     isLoading?: boolean;
+    logoUri?: string;
 }
 
 const levelIcon = (level: LogLevel) => {
@@ -84,7 +84,8 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
     onClose,
     filter: externalFilter,
     onFilterChange,
-    isLoading = false
+    isLoading = false,
+    logoUri
 }) => {
     const [internalFilter, setInternalFilter] = useState<string>('all');
     const filter = externalFilter !== undefined ? externalFilter : internalFilter;
@@ -298,7 +299,8 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
                 <div className="console-container">
                     <div className="console-title-bar">
                         <div className="console-title">
-                            <ThunderboltOutlined className="title-icon" /> CONSOLE
+                            {logoUri && <img src={logoUri} className="console-logo" alt="TraneAI" />}
+                            <span>CONSOLE</span>
                         </div>
                         <Tooltip title="Close" placement="left">
                             <Button

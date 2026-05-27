@@ -286,6 +286,7 @@ const ChatApp: React.FC = () => {
 					filter={consoleFilter}
 					onFilterChange={setConsoleFilter}
 					isLoading={isTyping}
+					logoUri={LOGO_URI}
 				/>
 				<MessageList 
 					messages={messages} 
