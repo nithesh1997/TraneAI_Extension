@@ -13,6 +13,7 @@ import { SignupPage } from './components/SignupPage';
 import { WorkspaceEmptyState } from './components/WorkspaceEmptyState';
 import { ChatHistory, SessionSummary } from './components/ChatHistory';
 import { MessageData, Attachment, EditProposal } from './components/Message';
+import { ConsolePanel, LogEntry, LogLevel, LogSource } from './components/ConsolePanel';
 import { secureStore, secureRetrieve } from './utils/storage';
 
 const TAB_STORAGE_KEY = 'traneai_tab';
@@ -21,6 +22,7 @@ interface StoredTab {
 	currentModel: string;
 	authView: 'login' | 'signup';
 	currentSessionId?: string;
+	consoleFilter?: string;
 }
 
 declare const vscode: any;
@@ -43,11 +45,15 @@ const ChatApp: React.FC = () => {
 		return state?.workspaceRoot || '';
 	});
 	const [isLoading, setIsLoading] = useState(true);
+	const [consoleLogs, setConsoleLogs] = useState<LogEntry[]>([]);
+	const [consoleVisible, setConsoleVisible] = useState(false);
+	const [consoleFilter, setConsoleFilter] = useState('all');
 
 	useEffect(() => {
 		secureRetrieve<StoredTab>(TAB_STORAGE_KEY).then(stored => {
 			if (stored?.currentModel) { setCurrentModel(stored.currentModel); }
 			if (stored?.authView) { setAuthView(stored.authView); }
+			if (stored?.consoleFilter) { setConsoleFilter(stored.consoleFilter); }
 		}).finally(() => {
 			if (!isAuthenticated) {
 				setIsLoading(false);
@@ -101,6 +107,13 @@ const ChatApp: React.FC = () => {
 						setWorkspaceOpen(message.workspaceOpen);
 					}
 					break;
+				case 'consoleLogs':
+					setConsoleLogs(message.logs);
+					// Auto-show console if there are errors
+					if (message.logs.some((l: LogEntry) => l.level === LogLevel.Error)) {
+						setConsoleVisible(true);
+					}
+					break;
 			}
 		};
 
@@ -109,8 +122,8 @@ const ChatApp: React.FC = () => {
 	}, []);
 
 	useEffect(() => {
-		secureStore(TAB_STORAGE_KEY, { currentModel, authView, currentSessionId });
-	}, [currentModel, authView, currentSessionId]);
+		secureStore(TAB_STORAGE_KEY, { currentModel, authView, currentSessionId, consoleFilter });
+	}, [currentModel, authView, currentSessionId, consoleFilter]);
 
 	const handleSendMessage = useCallback((text: string, model: string, attachments: Attachment[], pinnedFiles?: string[]) => {
 		vscode.postMessage({ command: 'sendMessage', text, model, attachments, pinnedFiles });
@@ -209,6 +222,18 @@ const ChatApp: React.FC = () => {
 		handleSendMessage(text, currentModel, []);
 	}, [handleSendMessage, currentModel]);
 
+	const handleFixLog = useCallback((log: LogEntry) => {
+		vscode.postMessage({ command: 'fixLog', log, model: currentModel });
+	}, [currentModel]);
+
+	const handleClearLogs = useCallback(() => {
+		vscode.postMessage({ command: 'clearLogs' });
+	}, []);
+
+	const handleExecuteExpression = useCallback((expression: string) => {
+		vscode.postMessage({ command: 'executeExpression', expression });
+	}, []);
+
 	const handleOpenFile = useCallback((filePath: string) => {
 		vscode.postMessage({ command: 'openFile', filePath });
 	}, []);
@@ -251,6 +276,17 @@ const ChatApp: React.FC = () => {
 			/>
 			<div id="chat-container" className="chat-container">
 				<HeroSection logoUri={LOGO_URI} onQuickSend={handleQuickSend} visible={messages.length === 0} currentModel={currentModel} />
+				<ConsolePanel 
+					logs={consoleLogs} 
+					onFix={handleFixLog} 
+					onClear={handleClearLogs}
+					onExecuteExpression={handleExecuteExpression}
+					visible={consoleVisible} 
+					onClose={() => setConsoleVisible(false)}
+					filter={consoleFilter}
+					onFilterChange={setConsoleFilter}
+					isLoading={isTyping}
+				/>
 				<MessageList 
 					messages={messages} 
 					logoUri={LOGO_URI} 
@@ -279,6 +315,8 @@ const ChatApp: React.FC = () => {
 					isTyping={isTyping}
 					onStopGeneration={handleStopGeneration}
 					workspaceRoot={workspaceRoot}
+					onToggleConsole={() => setConsoleVisible(!consoleVisible)}
+					isConsoleVisible={consoleVisible}
 				/>
 				<ChatFooter />
 			</div>

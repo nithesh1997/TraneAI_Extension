@@ -13,6 +13,7 @@ import { SessionManager, SessionMessage, ChatSession, SessionSummary } from './s
 import { BackendService } from './services/BackendService';
 import { ChatActionHandler, IChatProvider } from './services/ChatActionHandler';
 import { handleWebviewMessage } from './services/MessageHandler';
+import { ConsoleService, LogEntry } from './services/ConsoleService';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvider {
 	public static readonly viewType = 'traneai.chatView';
@@ -36,6 +37,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 		this._checkpointManager = new CheckpointManager(_extensionUri);
 		this.sessionManager = new SessionManager();
 		this.actionHandler = new ChatActionHandler(this);
+
+		// Listen for console logs
+		ConsoleService.getInstance().onDidUpdateLogs(logs => {
+			this.postMessageToWebview({ type: 'consoleLogs', logs });
+		});
 	}
 
 	public findWorkspaceAppRoot(): string | undefined {
@@ -131,6 +137,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 
 		this.broadcastHistoryList();
 		this.broadcastBrowserUrl();
+		this.broadcastConsoleLogs();
 	}
 
 	public setFullScreen(value: boolean) {
@@ -171,6 +178,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 	public broadcastBrowserUrl() {
 		const msg = { type: 'browserUrl', value: this._activeBrowserUrl };
 		this.postMessageToWebview(msg);
+	}
+
+	public broadcastConsoleLogs() {
+		const logs = ConsoleService.getInstance().getLogs();
+		this.postMessageToWebview({ type: 'consoleLogs', logs });
 	}
 
 	public postMessageToWebview(message: any) {

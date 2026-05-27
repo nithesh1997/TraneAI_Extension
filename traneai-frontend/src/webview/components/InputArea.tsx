@@ -27,6 +27,8 @@ interface InputAreaProps {
 	isTyping?: boolean;
 	onStopGeneration?: () => void;
 	workspaceRoot?: string;
+	onToggleConsole?: () => void;
+	isConsoleVisible?: boolean;
 }
 
 // Models, skills, and context options imported from InputAreaHelpers.tsx
@@ -53,7 +55,7 @@ const CodePalette: React.FC<{ cb: CodeBlock; onRemove: (id: number) => void }> =
 	);
 };
 
-export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration, workspaceRoot: workspaceRootProp }) => {
+export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration, workspaceRoot: workspaceRootProp, onToggleConsole, isConsoleVisible }) => {
 	const [text, setText] = useState(() => {
 		const state = vscode.getState();
 		return state?.inputText || '';
@@ -899,6 +901,31 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 					</div>
 
 					<div className="right-controls">
+						<button 
+							className={`console-toggle-btn ${isConsoleVisible ? 'active' : ''}`}
+							onClick={onToggleConsole}
+							title="Toggle Application Console"
+							style={{
+								background: isConsoleVisible ? 'var(--vscode-button-background)' : 'transparent',
+								color: isConsoleVisible ? 'var(--vscode-button-foreground)' : 'var(--vscode-foreground)',
+								border: '1px solid var(--vscode-button-background)',
+								borderRadius: '4px',
+								padding: '4px 8px',
+								fontSize: '11px',
+								fontWeight: 600,
+								cursor: 'pointer',
+								display: 'flex',
+								alignItems: 'center',
+								gap: '4px',
+								marginRight: '8px'
+							}}
+						>
+							<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+								<path d="M2 4h12v8H2V4z" stroke="currentColor" strokeWidth="1.2" />
+								<path d="M4 8h1M6 8h3" stroke="currentColor" strokeWidth="1.2" />
+							</svg>
+							Console
+						</button>
 						{activeBrowserUrl && (
 							<button 
 								className="snapshot-btn" 

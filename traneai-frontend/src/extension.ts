@@ -1,7 +1,10 @@
 import * as vscode from 'vscode';
 import { ChatViewProvider } from './ChatViewProvider';
+import { ConsoleService } from './services/ConsoleService';
 
 export function activate(context: vscode.ExtensionContext) {
+	// Initialize Console Service
+	ConsoleService.getInstance();
 	let chatPanel: vscode.WebviewPanel | undefined;
 
 	// Auto-reload logic for development

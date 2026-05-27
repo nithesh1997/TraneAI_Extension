@@ -4,6 +4,8 @@
  * provider behavior, such as sending messages, file operations, and tools.
  */
 import { ChatViewProvider } from '../ChatViewProvider';
+import { ConsoleService, LogLevel, LogSource } from './ConsoleService';
+import * as vscode_api from 'vscode';
 
 export function handleWebviewMessage(provider: ChatViewProvider, data: any, vscode: any) {
     switch (data.command) {
@@ -134,7 +136,41 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
             provider.actionHandler.handleApplyMultiEdit(data.edits);
             break;
         case 'openFile':
-            provider.actionHandler.handleOpenFile(data.path);
+            provider.actionHandler.handleOpenFile(data.filePath);
+            break;
+        case 'fixLog':
+            const activeEditor = vscode.window.activeTextEditor;
+            const log = data.log;
+            let contextText = `I'm seeing this issue in the ${log.source}:\n\n**${log.level}**: ${log.message}`;
+            if (log.file) {
+                contextText += `\nLocation: \`${log.file}\` (line ${log.line})`;
+            }
+            
+            if (activeEditor) {
+                const doc = activeEditor.document;
+                const selection = activeEditor.selection;
+                const fileName = doc.fileName.split(/[\\/]/).pop();
+                contextText += `\n\nActive file: \`${fileName}\``;
+                if (!selection.isEmpty) {
+                    const selectedText = doc.getText(selection);
+                    contextText += `\nRelevant code:\n\`\`\`\n${selectedText}\n\`\`\``;
+                }
+            }
+            
+            contextText += `\n\nPlease help me fix it.`;
+            
+            if (!provider.currentSessionId) {
+                provider.createNewSession();
+            }
+            provider.addMessage('user', contextText);
+            provider.broadcastTyping(true);
+            provider.sendToBackend(contextText, data.model || 'auto', [], provider.abortController?.signal).then(() => {
+                provider.broadcastTyping(false);
+                provider.saveCurrentSession();
+                provider.broadcastHistoryList();
+            }).catch(() => {
+                provider.broadcastTyping(false);
+            });
             break;
         case 'executeCommand':
             provider.actionHandler.handleExecuteCommand(data.cmd);
@@ -156,6 +192,39 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                 vscode.commands.executeCommand('simpleBrowser.api.open', data.url).catch(() => {
                     vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(data.url));
                 });
+            }
+            break;
+        case 'clearLogs':
+            ConsoleService.getInstance().clearLogs();
+            break;
+        case 'executeExpression':
+            const expression = data.expression;
+            if (!expression) break;
+            
+            // Try evaluating in debug session first
+            const activeDebugSession = vscode.debug.activeDebugSession;
+            if (activeDebugSession) {
+                activeDebugSession.evaluate(expression).then(
+                    (result: any) => {
+                        ConsoleService.getInstance().addLog({
+                            level: LogLevel.Info,
+                            message: `Result: ${JSON.stringify(result)}`,
+                            source: LogSource.Runtime
+                        });
+                    },
+                    (error: any) => {
+                        ConsoleService.getInstance().addLog({
+                            level: LogLevel.Error,
+                            message: `Evaluation Error: ${error.message}`,
+                            source: LogSource.Runtime
+                        });
+                    }
+                );
+            } else {
+                // Fallback to active terminal
+                const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('TraneAI Console');
+                terminal.show();
+                terminal.sendText(expression);
             }
             break;
         case 'takeSnapshot':
