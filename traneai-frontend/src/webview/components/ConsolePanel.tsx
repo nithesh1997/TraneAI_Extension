@@ -465,17 +465,17 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
                     </div>
 
                     <div className="console-status-footer">
-                        <span className="status-item logs">
-                            {logCount} logs
+                        <span className="status-item error">
+                            <CloseCircleFilled /> {errorCount} error
                         </span>
                         <span className="status-item warning">
                             <WarningFilled /> {warningCount} warnings
                         </span>
-                        <span className="status-item error">
-                            <CloseCircleFilled /> {errorCount} errors
-                        </span>
                         <span className="status-item info">
-                            <InfoCircleFilled /> {infoCount} info
+                            <CheckCircleFilled /> {infoCount} info
+                        </span>
+                        <span className="status-item logs">
+                            <InfoCircleFilled /> {logCount} logs
                         </span>
                     </div>
                 </div>
