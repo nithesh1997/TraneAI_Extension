@@ -1,11 +1,49 @@
 import * as vscode from 'vscode';
 import { ChatViewProvider } from './ChatViewProvider';
 import { ConsoleService } from './services/ConsoleService';
+import { SyncBridge } from './syncBridge';
+import { BrowserPanel } from './browser/browserPanel';
+import { MessageType } from './types';
+import { AIService } from './ai/aiService';
 
 export function activate(context: vscode.ExtensionContext) {
 	// Initialize Console Service
 	ConsoleService.getInstance();
+
+	// Initialize Sync Bridge
+	const syncBridge = SyncBridge.getInstance();
+	
+	// Initialize AI Service
+	AIService.getInstance();
+	
 	let chatPanel: vscode.WebviewPanel | undefined;
+
+	// Watchers (Layer 5)
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeTextDocument(e => {
+			syncBridge.send(MessageType.FILE_CHANGED, {
+				uri: e.document.uri.toString(),
+				content: e.document.getText()
+			});
+		}),
+		vscode.window.onDidChangeTextEditorSelection(e => {
+			syncBridge.send(MessageType.CURSOR_MOVED, {
+				uri: e.textEditor.document.uri.toString(),
+				line: e.selections[0].active.line,
+				character: e.selections[0].active.character,
+				selection: e.textEditor.document.getText(e.selections[0])
+			});
+		})
+	);
+
+	// Register Browser Panel Command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('trane-ai.openBrowser', async () => {
+			const uri = vscode.Uri.parse('http://localhost:3000');
+			const externalUri = await vscode.env.asExternalUri(uri);
+			BrowserPanel.createOrShow(context.extensionUri, externalUri.toString());
+		})
+	);
 
 	// Auto-reload logic for development
 	if (context.extensionMode === vscode.ExtensionMode.Development) {
@@ -102,14 +140,23 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('trane-ai.closeChat', () => {
 			vscode.commands.executeCommand('workbench.action.closeSidebarPane');
 		}),
-		vscode.commands.registerCommand('trane-ai.openUrl', (url: string) => {
+		vscode.commands.registerCommand('trane-ai.openUrl', async (url: string) => {
 			const config = vscode.workspace.getConfiguration('trane-ai');
 			const openIn = config.get<string>('openIn') || 'vscode';
 			
+			const uri = vscode.Uri.parse(url);
+			const externalUri = await vscode.env.asExternalUri(uri);
+			const finalUrl = externalUri.toString();
+
 			if (openIn === 'vscode') {
-				vscode.commands.executeCommand('simpleBrowser.show', vscode.Uri.parse(url));
+				// If browser panel is open, navigate it
+				if (BrowserPanel.currentPanel) {
+					syncBridge.send(MessageType.NAVIGATE, { url: finalUrl });
+				} else {
+					vscode.commands.executeCommand('simpleBrowser.show', finalUrl);
+				}
 			} else {
-				vscode.env.openExternal(vscode.Uri.parse(url));
+				vscode.env.openExternal(externalUri);
 			}
 		})
 	);

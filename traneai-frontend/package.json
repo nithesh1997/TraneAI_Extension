@@ -54,6 +54,11 @@
         "command": "trane-ai.closeChat",
         "title": "Close Chat",
         "icon": "$(close)"
+      },
+      {
+        "command": "trane-ai.openBrowser",
+        "title": "Open TraneAI Browser",
+        "icon": "$(browser)"
       }
     ],
     "configuration": {
