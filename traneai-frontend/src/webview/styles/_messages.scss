@@ -249,6 +249,11 @@
       border-radius: 12px;
       border: 1px solid rgba(255, 255, 255, 0.05);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      max-width: 90%;
+      width: fit-content;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      overflow: hidden;
     }
 
   }
@@ -1109,6 +1114,7 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        max-width: 260px;
       }
     }
   }

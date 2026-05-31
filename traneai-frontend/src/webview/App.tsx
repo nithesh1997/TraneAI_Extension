@@ -230,9 +230,29 @@ const ChatApp: React.FC = () => {
 		vscode.postMessage({ command: 'clearLogs' });
 	}, []);
 
-	const handleExecuteExpression = useCallback((expression: string) => {
-		vscode.postMessage({ command: 'executeExpression', expression });
-	}, []);
+	const handleExecuteExpression = useCallback((expression: string, checkedLogs: LogEntry[]) => {
+		if (checkedLogs && checkedLogs.length > 0) {
+			const logAttachments: Attachment[] = checkedLogs.map(l => ({
+				name: `${l.level}: ${l.message}`,
+				path: l.file || 'runtime',
+				type: 'console'
+			}));
+			
+			const logsContext = checkedLogs.map(l => 
+				`[${l.level}] ${l.message}${l.file ? ` (${l.file}:${l.line})` : ''}`
+			).join('\n');
+			
+			// We still include a summary in message text for the LLM context, but use attachments for UI
+			const textForAI = `${expression}\n\nRelevant logs:\n\`\`\`\n${logsContext}\n\`\`\``;
+			
+			setIsTyping(true);
+			handleSendMessage(textForAI, currentModel, logAttachments);
+			
+			setConsoleVisible(false);
+		} else {
+			vscode.postMessage({ command: 'executeExpression', expression });
+		}
+	}, [handleSendMessage, currentModel]);
 
 	const handleOpenFile = useCallback((filePath: string) => {
 		vscode.postMessage({ command: 'openFile', filePath });

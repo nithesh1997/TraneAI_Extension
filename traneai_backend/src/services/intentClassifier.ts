@@ -41,6 +41,7 @@ export class IntentClassifier {
     if (!this.client) {
       return Intent.CHAT;
     }
+    const truncatedMessage = message.length > 2000 ? message.substring(0, 2000) + '...' : message;
     const prompt = `Classify the following user message into one of these intents:
 - CHAT: General conversation, greeting, or non-coding question.
 - EXPLAIN_CODE: Asking to explain how a file or function works without changing it.
@@ -55,7 +56,7 @@ CRITICAL: If the message mentions a file (e.g. using @) and asks for ANY modific
 
 Return ONLY the intent name in uppercase.
 
-Message: "${message}"`;
+Message: "${truncatedMessage}"`;
 
     try {
       const response = await this.client.chat.completions.create({

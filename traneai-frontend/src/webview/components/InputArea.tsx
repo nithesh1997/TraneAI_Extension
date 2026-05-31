@@ -844,60 +844,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 							)}
 						</div>
 
-						{activeBrowserUrl && (
-							<div className="console-selector" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-								<button 
-									className={`icon-btn ${showConsoleDropdown ? 'active' : ''}`}
-									title="Console Filters"
-									onClick={(e) => { e.stopPropagation(); setShowConsoleDropdown(!showConsoleDropdown); }}
-									style={{ padding: '5px 7px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-								>
-									<svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-										<path d="M2 4h12v8H2V4z" stroke="currentColor" strokeWidth="1.2" />
-										<path d="M4 8h1M6 8h3" stroke="currentColor" strokeWidth="1.2" />
-									</svg>
-									Console
-								</button>
-								{showConsoleDropdown && (
-									<div className="dropdown-menu show" style={{ bottom: '100%', left: 0, marginBottom: '8px', minWidth: '150px' }}>
-										<div className="dropdown-label">Console Filters</div>
-										{[
-											{ id: 'all', label: 'Messages', icon: '📋', color: 'var(--text-primary)' },
-											{ id: 'error', label: 'Errors', icon: '❌', color: '#f85149' },
-											{ id: 'warning', label: 'Warnings', icon: '⚠️', color: '#d29922' },
-											{ id: 'info', label: 'Info', icon: 'ℹ️', color: '#58a6ff' },
-											{ id: 'verbose', label: 'Verbose', icon: '🔍', color: '#8b949e' }
-										].map(filter => (
-											<div 
-												key={filter.id} 
-												className={`dropdown-item ${selectedConsoleFilter === filter.id ? 'selected' : ''}`}
-												onClick={() => {
-													setSelectedConsoleFilter(filter.id);
-													setShowConsoleDropdown(false);
-													
-													// Add/Replace console attachment
-													const consoleAttachment: Attachment = {
-														name: `Console: ${filter.label}`,
-														path: filter.id,
-														type: 'console'
-													};
-													
-													setAttachedFiles(prev => {
-														const filtered = prev.filter(f => f.type !== 'console');
-														return [...filtered, consoleAttachment];
-													});
-												}}
-												style={{ display: 'flex', alignItems: 'center', gap: '10px' }}
-											>
-												<span style={{ fontSize: '14px', width: '16px', textAlign: 'center', color: filter.color }}>{filter.icon}</span>
-												<span style={{ color: selectedConsoleFilter === filter.id ? 'var(--accent)' : 'inherit' }}>{filter.label}</span>
-												{selectedConsoleFilter === filter.id && <span className="item-check" style={{ marginLeft: 'auto' }}>✓</span>}
-											</div>
-										))}
-									</div>
-								)}
-							</div>
-						)}
+						{/* Browser-related console filter removed as requested */}
 					</div>
 
 					<div className="right-controls">

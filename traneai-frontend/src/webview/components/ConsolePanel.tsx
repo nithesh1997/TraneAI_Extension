@@ -53,7 +53,7 @@ interface ConsolePanelProps {
     logs: LogEntry[];
     onFix?: (log: LogEntry) => void;
     onClear?: () => void;
-    onExecuteExpression?: (expression: string) => void;
+    onExecuteExpression?: (expression: string, checkedLogs: LogEntry[]) => void;
     visible?: boolean;
     onClose?: () => void;
     filter?: string;
@@ -98,10 +98,15 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
 
     // Drag and Resize state
     const [dimensions, setDimensions] = useState({ width: 640, height: 440 });
-    const [position, setPosition] = useState<{ x: number, y: number }>(() => ({
-        x: window.innerWidth - 660,
-        y: window.innerHeight - 520,
-    }));
+    const [position, setPosition] = useState<{ x: number, y: number }>(() => {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        // Default to bottom right but at least 10px from edge
+        return {
+            x: Math.max(10, w - 660),
+            y: Math.max(10, h - 460)
+        };
+    });
 
     useEffect(() => {
         const handleResize = () => {
@@ -176,8 +181,10 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
 
     const handleRunExpression = () => {
         if (expression.trim() && onExecuteExpression) {
-            onExecuteExpression(expression);
+            const checkedLogsList = logs.filter(l => checkedIds.has(l.id));
+            onExecuteExpression(expression, checkedLogsList);
             setExpression('');
+            setCheckedIds(new Set());
         }
     };
 
@@ -270,10 +277,10 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
                 className={`console-modal-overlay ${isLoading ? 'loading' : ''} ${mounted ? 'mounted' : ''}`}
                 size={{ width: dimensions.width, height: dimensions.height }}
                 position={position}
-                onDragStop={(e, d) => {
+                onDragStop={(e: any, d: any) => {
                     setPosition({ x: d.x, y: d.y });
                 }}
-                onResizeStop={(e, direction, ref, delta, pos) => {
+                onResizeStop={(e: any, direction: any, ref: any, delta: any, pos: any) => {
                     setDimensions({
                         width: parseInt(ref.style.width),
                         height: parseInt(ref.style.height),
