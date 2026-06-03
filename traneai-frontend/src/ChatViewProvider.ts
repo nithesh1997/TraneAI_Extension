@@ -14,6 +14,7 @@ import { BackendService } from './services/BackendService';
 import { ChatActionHandler, IChatProvider } from './services/ChatActionHandler';
 import { handleWebviewMessage } from './services/MessageHandler';
 import { ConsoleService, LogEntry } from './services/ConsoleService';
+import { ContextCollector } from './services/ContextCollector';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvider {
 	public static readonly viewType = 'traneai.chatView';
@@ -278,6 +279,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 	}
 
 	public async sendToBackend(message: string, model?: string, attachments?: any[], signal?: AbortSignal): Promise<string> {
+		const context = await ContextCollector.collectContext();
 		const history = this._messages
 			.slice(0, -1)
 			.filter(m => !m.isStreaming && m.text)
@@ -301,7 +303,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 			signal,
 			(text: string, isFinal: boolean) => {
 				this.updateMessageText(aiMsgId, text, !isFinal);
-			}
+			},
+			context
 		);
 	}
 

@@ -5,6 +5,7 @@
  */
 import { ChatViewProvider } from '../ChatViewProvider';
 import { ConsoleService, LogLevel, LogSource } from './ConsoleService';
+import { BackendService } from './BackendService';
 import * as vscode_api from 'vscode';
 
 export function handleWebviewMessage(provider: ChatViewProvider, data: any, vscode: any) {
@@ -251,6 +252,32 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                 .catch(err => {
                     provider.broadcastTyping(false);
                     vscode.window.showErrorMessage(`Snapshot error: ${err.message}`);
+                });
+            }
+            break;
+        case 'voiceInput':
+            const audioData = data.audioData; // ArrayBuffer
+            if (audioData) {
+                const audioBlob = new Blob([audioData], { type: 'audio/webm' });
+                console.log('Received voiceInput from webview, blob size:', audioBlob.size);
+                BackendService.transcribeAudio(audioBlob).then((text: string) => {
+                    console.log('Transcription result:', text);
+                    if (text) {
+                        provider.postMessageToWebview({ type: 'transcriptionResult', text });
+                    }
+                }).catch((err: any) => {
+                    console.error('Transcription error in extension:', err);
+                    vscode.window.showErrorMessage(`Transcription error: ${err.message}`);
+                });
+            }
+            break;
+        case 'speakText':
+            const textToSpeak = data.text;
+            if (textToSpeak) {
+                BackendService.synthesizeSpeech(textToSpeak).then((buffer: ArrayBuffer) => {
+                    provider.postMessageToWebview({ type: 'audioResult', audioData: buffer });
+                }).catch((err: any) => {
+                    vscode.window.showErrorMessage(`TTS error: ${err.message}`);
                 });
             }
             break;

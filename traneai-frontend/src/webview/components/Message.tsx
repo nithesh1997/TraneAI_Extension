@@ -762,9 +762,10 @@ interface MessageProps {
 	onOpenFile?: (path: string) => void;
 	onFixCommand?: (cmd: string, output: string) => void;
 	onSelectChoice?: (choice: string, command?: string) => void;
+	onSpeak?: (text: string) => void;
 }
 
-export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, userEmail, onApplyEdit, onApplyMultiEdit, onRejectEdit, onRevertEdit, onShowDiff, onOpenFile, onFixCommand, onSelectChoice }) => {
+export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, userEmail, onApplyEdit, onApplyMultiEdit, onRejectEdit, onRevertEdit, onShowDiff, onOpenFile, onFixCommand, onSelectChoice, onSpeak }) => {
 	const isUser = message.role === 'user';
 	const parts = React.useMemo(() => parseMessageParts(message.text), [message.text]);
 
@@ -858,7 +859,20 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 				</div>
 				{!isUser && (
 					<div className="msg-actions">
-						<button className="msg-action-btn" onClick={() => onCopy(message.text)}>Copy</button>
+						<button className="msg-action-btn" onClick={() => onCopy(message.text)} title="Copy message">
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+								<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+							</svg>
+							Copy
+						</button>
+						<button className="msg-action-btn" onClick={() => onSpeak?.(message.text)} title="Speak message">
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+								<path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+							</svg>
+							Speak
+						</button>
 					</div>
 				)}
 			</div>

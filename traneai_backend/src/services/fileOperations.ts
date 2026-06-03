@@ -145,3 +145,80 @@ export async function analyzeCode(filePath: string, workspaceRoot?: string): Pro
     return `Error analyzing file: ${err.message}`;
   }
 }
+
+export async function deleteFile(filePath: string, workspaceRoot?: string): Promise<string> {
+  if (!workspaceRoot) return 'Workspace root not found.';
+  const fullPath = path.join(workspaceRoot, filePath);
+  if (!fs.existsSync(fullPath)) return `File not found: ${filePath}`;
+  
+  try {
+    fs.unlinkSync(fullPath);
+    return `Successfully deleted file: ${filePath}`;
+  } catch (err: any) {
+    return `Error deleting file: ${err.message}`;
+  }
+}
+
+export async function renameFile(oldPath: string, newPath: string, workspaceRoot?: string): Promise<string> {
+  if (!workspaceRoot) return 'Workspace root not found.';
+  const fullOldPath = path.join(workspaceRoot, oldPath);
+  const fullNewPath = path.join(workspaceRoot, newPath);
+  
+  if (!fs.existsSync(fullOldPath)) return `File not found: ${oldPath}`;
+  
+  try {
+    const newDir = path.dirname(fullNewPath);
+    if (!fs.existsSync(newDir)) {
+      fs.mkdirSync(newDir, { recursive: true });
+    }
+    fs.renameSync(fullOldPath, fullNewPath);
+    return `Successfully renamed ${oldPath} to ${newPath}`;
+  } catch (err: any) {
+    return `Error renaming file: ${err.message}`;
+  }
+}
+
+export async function searchFiles(query: string, workspaceRoot?: string): Promise<string> {
+    if (!workspaceRoot) return 'Workspace root not found.';
+    
+    const results: string[] = [];
+    const maxResults = 50;
+    
+    async function searchRecursive(dir: string) {
+        if (results.length >= maxResults) return;
+        
+        try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.')) continue;
+                
+                const fullPath = path.join(dir, entry.name);
+                const relativePath = path.relative(workspaceRoot!, fullPath);
+                
+                if (entry.isDirectory()) {
+                    await searchRecursive(fullPath);
+                } else {
+                    try {
+                        const content = fs.readFileSync(fullPath, 'utf-8');
+                        if (content.includes(query)) {
+                            const lines = content.split('\n');
+                            const matches = lines
+                                .map((line, idx) => line.includes(query) ? `${idx + 1}: ${line.trim()}` : null)
+                                .filter(Boolean);
+                            
+                            results.push(`File: ${relativePath}\n${matches.slice(0, 3).join('\n')}\n`);
+                        }
+                    } catch (e) {}
+                }
+                if (results.length >= maxResults) break;
+            }
+        } catch (e) {}
+    }
+    
+    try {
+        await searchRecursive(workspaceRoot);
+        return results.length > 0 ? results.join('\n') : 'No matches found.';
+    } catch (err: any) {
+        return `Error searching files: ${err.message}`;
+    }
+}

@@ -9,6 +9,7 @@ import swaggerUi from 'swagger-ui-express';
 import cookieParser from 'cookie-parser';
 import chatRoutes from './routes/chat.js';
 import workspaceRoutes from './routes/workspace.js';
+import voiceRoutes from './routes/voice.js';
 import { swaggerOptions } from './swagger.js';
 
 const app = express();
@@ -27,6 +28,7 @@ app.use(cookieParser());
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 app.use('/api/chat', chatRoutes);
 app.use('/api/workspace', workspaceRoutes);
+app.use('/api/voice', voiceRoutes);
 // app.use('/api/auth', authRoutes);
 // app.get('/health', (req, res) => {
 //   res.json({ status: 'ok', timestamp: new Date().toISOString() });

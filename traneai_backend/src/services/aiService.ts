@@ -2,7 +2,7 @@ import { AzureOpenAI } from 'openai';
 import { handleZenflowMessage } from './zenflowService';
 import { MODE_DUMMY_RESPONSES } from './constants';
 import { AI_TOOLS } from './tools';
-import { listFiles, readFile, createFile, writeFile, editFile, analyzeCode } from './fileOperations';
+import { listFiles, readFile, createFile, writeFile, editFile, analyzeCode, searchFiles, deleteFile, renameFile } from './fileOperations';
 import { runCommand } from './commandRunner';
 import { WorkspaceIndexer } from './workspaceIndexer';
 import { IntentClassifier, Intent } from './intentClassifier';
@@ -10,7 +10,8 @@ import { IntentClassifier, Intent } from './intentClassifier';
 const indexers: Map<string, WorkspaceIndexer> = new Map();
 const classifier = new IntentClassifier();
 
-const getEnhancedSystemPrompt = (wsRoot?: string, indexSummary?: string, intent?: Intent) => `You are TraneAI, an advanced AI software engineering assistant developed by Trane Technologies.
+const getEnhancedSystemPrompt = (wsRoot?: string, indexSummary?: string, intent?: Intent, context?: any) => {
+  let prompt = `You are TraneAI, an advanced AI software engineering assistant developed by Trane Technologies.
 
 ## Current Goal: ${intent || 'General Assistance'}
 
@@ -45,7 +46,32 @@ ${indexSummary || 'No workspace index available.'}
 ## Workspace Access
 - Workspace root: ${wsRoot || 'Not available'}
 - You have full read/write access to the entire workspace
+`;
 
+  if (context) {
+    prompt += `\n## Active Editor Context\n`;
+    if (context.currentFile) {
+      prompt += `File: ${context.currentFile}\n`;
+      prompt += `Language: ${context.activeEditorLanguage}\n`;
+    }
+    if (context.selectedCode) {
+      prompt += `Selected Code:\n\`\`\`${context.activeEditorLanguage || ''}\n${context.selectedCode}\n\`\`\`\n`;
+    }
+    if (context.openTabs && context.openTabs.length > 0) {
+      prompt += `\n## Open Tabs\n${context.openTabs.join('\n')}\n`;
+    }
+    if (context.diagnostics && context.diagnostics.length > 0) {
+      prompt += `\n## Active Errors/Warnings\n${context.diagnostics.map((d: any) => `${d.file}: ${d.message} (${d.severity})`).join('\n')}\n`;
+    }
+    if (context.projectType) {
+      prompt += `\nProject Type: ${context.projectType}\n`;
+    }
+    if (context.gitBranch) {
+      prompt += `\nGit Branch: ${context.gitBranch}\n`;
+    }
+  }
+
+  prompt += `
 ## Available Tools
 
 ### list_files
@@ -136,6 +162,9 @@ ${indexSummary || 'No workspace index available.'}
 - Never guess command output - run the command
 - Always use the tools available to you`;
 
+  return prompt;
+};
+
 export async function generateAIResponse(
   message: string,
   history?: { role: 'user' | 'assistant'; content: string }[],
@@ -189,7 +218,7 @@ export async function generateAIResponse(
   const messages: any[] = [
     {
       role: 'system',
-      content: getEnhancedSystemPrompt(workspaceRoot, indexSummary, intent) + pinnedContext,
+      content: getEnhancedSystemPrompt(workspaceRoot, indexSummary, intent, context) + pinnedContext,
     },
     ...(history || []),
     { role: 'user', content: message }
@@ -244,6 +273,16 @@ export async function generateAIResponse(
         stepStr = `[STEP] Analyzing Code | ${functionArgs.filePath} [/STEP]`;
       } else if (functionName === 'run_command') {
         stepStr = `[STEP] Running Command | ${functionArgs.command} [/STEP]`;
+      } else if (functionName === 'search_files') {
+        stepStr = `[STEP] Searching Files | ${functionArgs.query} [/STEP]`;
+      } else if (functionName === 'delete_file') {
+        stepStr = `[STEP] Deleting File | ${functionArgs.filePath} [/STEP]`;
+      } else if (functionName === 'rename_file') {
+        stepStr = `[STEP] Renaming File | ${functionArgs.oldPath} -> ${functionArgs.newPath} [/STEP]`;
+      } else if (functionName === 'git_status') {
+        stepStr = `[STEP] Git Status [/STEP]`;
+      } else if (functionName === 'git_commit') {
+        stepStr = `[STEP] Git Commit | ${functionArgs.message} [/STEP]`;
       }
 
       if (stepStr) {
@@ -273,6 +312,17 @@ export async function generateAIResponse(
       } else if (functionName === 'run_command') {
         const proposal = await runCommand(functionArgs.command, workspaceRoot);
         functionResponse = proposal;
+      } else if (functionName === 'search_files') {
+        functionResponse = await searchFiles(functionArgs.query, workspaceRoot);
+      } else if (functionName === 'delete_file') {
+        functionResponse = await deleteFile(functionArgs.filePath, workspaceRoot);
+      } else if (functionName === 'rename_file') {
+        functionResponse = await renameFile(functionArgs.oldPath, functionArgs.newPath, workspaceRoot);
+      } else if (functionName === 'git_status') {
+        functionResponse = await runCommand('git status', workspaceRoot);
+      } else if (functionName === 'git_commit') {
+        await runCommand('git add .', workspaceRoot);
+        functionResponse = await runCommand(`git commit -m "${functionArgs.message}"`, workspaceRoot);
       }
 
       if (functionName === 'edit_file' || functionName === 'multi_file_edit' || functionName === 'create_file' || functionName === 'write_file' || functionName === 'run_command') {

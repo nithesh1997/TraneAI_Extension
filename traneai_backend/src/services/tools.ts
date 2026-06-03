@@ -126,5 +126,73 @@ export const AI_TOOLS = [
 				required: ['changes']
 			}
 		}
+	},
+	{
+		type: 'function' as const,
+		function: {
+			name: 'search_files',
+			description: 'Search for a text pattern or string across all files in the workspace. Use this to find usages of functions, variables, or specific text in the codebase.',
+			parameters: {
+				type: 'object',
+				properties: {
+					query: { type: 'string', description: 'The text string to search for' }
+				},
+				required: ['query']
+			}
+		}
+	},
+	{
+		type: 'function' as const,
+		function: {
+			name: 'delete_file',
+			description: 'Delete a file from the workspace. Use this to remove unwanted files or components.',
+			parameters: {
+				type: 'object',
+				properties: {
+					filePath: { type: 'string', description: 'Relative path from workspace root to the file to delete' }
+				},
+				required: ['filePath']
+			}
+		}
+	},
+	{
+		type: 'function' as const,
+		function: {
+			name: 'rename_file',
+			description: 'Rename or move a file in the workspace. Use this to reorganize project structure or rename components.',
+			parameters: {
+				type: 'object',
+				properties: {
+					oldPath: { type: 'string', description: 'Current relative path of the file' },
+					newPath: { type: 'string', description: 'New relative path for the file' }
+				},
+				required: ['oldPath', 'newPath']
+			}
+		}
+	},
+	{
+		type: 'function' as const,
+		function: {
+			name: 'git_status',
+			description: 'Get the current status of the git repository, including modified, added, and deleted files.',
+			parameters: {
+				type: 'object',
+				properties: {}
+			}
+		}
+	},
+	{
+		type: 'function' as const,
+		function: {
+			name: 'git_commit',
+			description: 'Stage all changes and commit them with a message.',
+			parameters: {
+				type: 'object',
+				properties: {
+					message: { type: 'string', description: 'The commit message' }
+				},
+				required: ['message']
+			}
+		}
 	}
 ];

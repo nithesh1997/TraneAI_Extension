@@ -7,6 +7,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Tag } from 'antd';
 import { Attachment } from './Message';
 import hljs from 'highlight.js';
+import { VoiceControls } from './VoiceControls';
 
 import {
 	CodeBlock,
@@ -124,6 +125,8 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 					type: 'url'
 				};
 				setAttachedFiles(prev => [...prev, snapshotAttachment, urlAttachment]);
+			} else if (message.type === 'transcriptionResult') {
+				setText((prev: string) => (prev ? prev + ' ' : '') + message.text);
 			}
 		};
 		window.addEventListener('message', handleMessage);
@@ -848,6 +851,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 					</div>
 
 					<div className="right-controls">
+						<VoiceControls onTranscription={(t) => setText((prev: string) => (prev ? prev + ' ' : '') + t)} isTyping={isTyping || false} />
 						<button 
 							className={`console-toggle-btn ${isConsoleVisible ? 'active' : ''}`}
 							onClick={onToggleConsole}

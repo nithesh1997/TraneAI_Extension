@@ -15,6 +15,7 @@ import { ChatHistory, SessionSummary } from './components/ChatHistory';
 import { MessageData, Attachment, EditProposal } from './components/Message';
 import { ConsolePanel, LogEntry, LogLevel, LogSource } from './components/ConsolePanel';
 import { secureStore, secureRetrieve } from './utils/storage';
+import { VoiceService } from './utils/VoiceService';
 
 const TAB_STORAGE_KEY = 'traneai_tab';
 
@@ -113,6 +114,12 @@ const ChatApp: React.FC = () => {
 					if (message.logs.some((l: LogEntry) => l.level === LogLevel.Error)) {
 						setConsoleVisible(true);
 					}
+					break;
+				case 'audioResult':
+					const voiceService = new VoiceService();
+					voiceService.playAudio(message.audioData).catch(err => {
+						console.error('Failed to play audio:', err);
+					});
 					break;
 			}
 		};
@@ -254,6 +261,10 @@ const ChatApp: React.FC = () => {
 		}
 	}, [handleSendMessage, currentModel]);
 
+	const handleSpeak = useCallback((text: string) => {
+		vscode.postMessage({ command: 'speakText', text });
+	}, []);
+
 	const handleOpenFile = useCallback((filePath: string) => {
 		vscode.postMessage({ command: 'openFile', filePath });
 	}, []);
@@ -321,6 +332,7 @@ const ChatApp: React.FC = () => {
 					onOpenFile={handleOpenFile}
 					onFixCommand={handleFixCommand}
 					onSelectChoice={handleSelectChoice}
+					onSpeak={handleSpeak}
 				/>
 				<TypingIndicator 
 					logoUri={LOGO_URI} 

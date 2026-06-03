@@ -145,9 +145,9 @@ const openUrlInBrowser = (url: string) => {
     setTimeout(() => {
         if (!workflowClosed) {
             // ONLY try VS Code browser methods - no external browser fallback
-            vscode.commands.executeCommand('simpleBrowser.api.open', url).catch((err) => {
+            vscode.commands.executeCommand('simpleBrowser.api.open', url).then(undefined, (err: any) => {
                 log(`\x1b[33m  ⚠ Simple browser failed, trying VS Code open command...\x1b[0m\r\n`);
-                vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url)).catch((err2) => {
+                vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url)).then(undefined, (err2: any) => {
                     log(`\x1b[31m  ✗ Could not open in VS Code browser: ${err2.message}\x1b[0m\r\n`);
                     pushStatus(`⚠ Could not open browser automatically. Please open ${url} manually in VS Code.`);
                 });
