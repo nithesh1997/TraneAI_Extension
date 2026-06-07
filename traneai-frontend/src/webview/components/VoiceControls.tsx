@@ -11,49 +11,38 @@ declare const vscode: any;
 export const VoiceControls: React.FC<VoiceControlsProps> = ({ onTranscription, isTyping }) => {
     const [isRecording, setIsRecording] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const voiceServiceRef = useRef(new VoiceService());
+    
+    React.useEffect(() => {
+        const handleMessage = (event: MessageEvent) => {
+            const message = event.data;
+            if (message.type === 'recordingStatus') {
+                if (message.status === 'started') {
+                    setIsRecording(true);
+                    setError(null);
+                } else if (message.status === 'stopped') {
+                    setIsRecording(false);
+                } else if (message.status === 'error') {
+                    setError(`Native Recording Error: ${message.error}`);
+                    setIsRecording(false);
+                }
+            }
+        };
+
+        window.addEventListener('message', handleMessage);
+        return () => window.removeEventListener('message', handleMessage);
+    }, []);
 
     const toggleRecording = async () => {
         console.log('Voice button clicked. Current state:', isRecording);
         setError(null);
 
         if (isRecording) {
-            try {
-                console.log('Stopping recording...');
-                const blob = await voiceServiceRef.current.stopRecording();
-                console.log('Recording stopped. Blob size:', blob.size);
-                setIsRecording(false);
-                
-                // Send to extension host for transcription
-                const reader = new FileReader();
-                reader.onload = () => {
-                    const arrayBuffer = reader.result as ArrayBuffer;
-                    console.log('Sending audio data to extension host...');
-                    vscode.postMessage({ command: 'voiceInput', audioData: arrayBuffer });
-                };
-                reader.readAsArrayBuffer(blob);
-            } catch (err: any) {
-                console.error('Failed to stop recording:', err);
-                setError(err.message);
-                setIsRecording(false);
-            }
+            console.log('Sending stopNativeRecording message...');
+            vscode.postMessage({ command: 'stopNativeRecording' });
+            // The actual state update happens in the message listener
         } else {
-            try {
-                console.log('Starting recording...');
-                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    throw new Error('MediaDevices API not available in this environment');
-                }
-                await voiceServiceRef.current.startRecording();
-                console.log('Recording started successfully');
-                setIsRecording(true);
-            } catch (err: any) {
-                console.error('Recording failed:', err);
-                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-                    setError('Permission Denied: Please allow VS Code to access your microphone in System Settings.');
-                } else {
-                    setError(err.message);
-                }
-            }
+            console.log('Sending startNativeRecording message...');
+            vscode.postMessage({ command: 'startNativeRecording' });
         }
     };
 

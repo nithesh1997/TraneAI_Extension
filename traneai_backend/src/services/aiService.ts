@@ -10,7 +10,15 @@ import { IntentClassifier, Intent } from './intentClassifier';
 const indexers: Map<string, WorkspaceIndexer> = new Map();
 const classifier = new IntentClassifier();
 
-const getEnhancedSystemPrompt = (wsRoot?: string, indexSummary?: string, intent?: Intent, context?: any) => {
+const getEnhancedSystemPrompt = (wsRoot?: string, indexSummary?: string, intent?: Intent, context?: any, isVoiceMode?: boolean) => {
+  if (isVoiceMode) {
+    return `You are a VS Code AI assistant responding to a voice query.
+     Keep your response to 1-3 short sentences.
+     Do NOT use markdown, bullet points, backticks, or code blocks.
+     Speak naturally and conversationally.
+     If the user asks for code, say "I'll show that in the editor" and use a VS Code command instead.`;
+  }
+
   let prompt = `You are TraneAI, an advanced AI software engineering assistant developed by Trane Technologies.
 
 ## Current Goal: ${intent || 'General Assistance'}
@@ -172,7 +180,8 @@ export async function generateAIResponse(
   workspaceRoot?: string,
   model?: string,
   onStep?: (step: string) => void,
-  pinnedFiles: string[] = []
+  pinnedFiles: string[] = [],
+  isVoiceMode: boolean = false
 ): Promise<string> {
   const client = new AzureOpenAI({
     apiKey: process.env.AZURE_OPENAI_API_KEY,
@@ -218,7 +227,7 @@ export async function generateAIResponse(
   const messages: any[] = [
     {
       role: 'system',
-      content: getEnhancedSystemPrompt(workspaceRoot, indexSummary, intent, context) + pinnedContext,
+      content: getEnhancedSystemPrompt(workspaceRoot, indexSummary, intent, context, isVoiceMode) + (isVoiceMode ? '' : pinnedContext),
     },
     ...(history || []),
     { role: 'user', content: message }
@@ -390,7 +399,8 @@ return `${blockMarkers}\n\n${finalContent}`;
 
 export async function generateVisionResponse(
   message: string,
-  images: { base64: string; mimeType: string }[]
+  images: { base64: string; mimeType: string }[],
+  isVoiceMode: boolean = false
 ): Promise<string> {
 
   const client = new AzureOpenAI({
@@ -410,7 +420,12 @@ export async function generateVisionResponse(
     messages: [
       {
         role: 'system',
-        content: 'You are TraneAI, a professional software engineer. Analyze the provided images and provide direct, helpful technical guidance.',
+        content: isVoiceMode 
+          ? `You are a VS Code AI assistant responding to a voice query about an image.
+             Keep your response to 1-3 short sentences.
+             Do NOT use markdown, bullet points, backticks, or code blocks.
+             Speak naturally and conversationally.`
+          : 'You are TraneAI, a professional software engineer. Analyze the provided images and provide direct, helpful technical guidance.',
       },
       { role: 'user', content: [{ type: 'text', text: message }, ...imageContent] as any }
     ],

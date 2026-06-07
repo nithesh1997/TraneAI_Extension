@@ -7,6 +7,9 @@ import { ChatViewProvider } from '../ChatViewProvider';
 import { ConsoleService, LogLevel, LogSource } from './ConsoleService';
 import { BackendService } from './BackendService';
 import * as vscode_api from 'vscode';
+import { VoiceRecorder } from './VoiceRecorder';
+import * as path from 'path';
+import * as fs from 'fs';
 
 export function handleWebviewMessage(provider: ChatViewProvider, data: any, vscode: any) {
     switch (data.command) {
@@ -280,6 +283,43 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                     vscode.window.showErrorMessage(`TTS error: ${err.message}`);
                 });
             }
+            break;
+        case 'startNativeRecording':
+            try {
+                const tempDir = path.join(provider.findWorkspaceAppRoot() || '', '.traneai_temp');
+                if (!fs.existsSync(tempDir)) {
+                    fs.mkdirSync(tempDir, { recursive: true });
+                }
+                VoiceRecorder.getInstance().start(tempDir);
+                provider.postMessageToWebview({ type: 'recordingStatus', status: 'started' });
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Native recording failed: ${err.message}. Please ensure a recording tool like 'arecord' or 'sox' is installed.`);
+                provider.postMessageToWebview({ type: 'recordingStatus', status: 'error', error: err.message });
+            }
+            break;
+        case 'stopNativeRecording':
+            VoiceRecorder.getInstance().stop().then(({ filePath, data }) => {
+                const audioBlob = new Blob([new Uint8Array(data)], { type: 'audio/wav' });
+                console.log('Native recording stopped, sending for transcription. Size:', audioBlob.size);
+                
+                // Trigger existing transcription logic
+                BackendService.transcribeAudio(audioBlob).then((text: string) => {
+                    console.log('Native transcription result:', text);
+                    if (text) {
+                        provider.postMessageToWebview({ type: 'transcriptionResult', text });
+                    }
+                    VoiceRecorder.getInstance().cleanup(filePath);
+                }).catch((err: any) => {
+                    console.error('Transcription error:', err);
+                    vscode.window.showErrorMessage(`Transcription error: ${err.message}`);
+                    VoiceRecorder.getInstance().cleanup(filePath);
+                });
+
+                provider.postMessageToWebview({ type: 'recordingStatus', status: 'stopped' });
+            }).catch((err) => {
+                console.error('Failed to stop native recording:', err);
+                provider.postMessageToWebview({ type: 'recordingStatus', status: 'error', error: err.message });
+            });
             break;
     }
 }

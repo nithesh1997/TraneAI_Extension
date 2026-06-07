@@ -8,6 +8,7 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
   const isStream = req.query.stream === 'true';
 
   try {
+    const { isVoiceMode } = req.body as ChatRequest;
     const uploadedFiles = Array.isArray(req.files) ? req.files as Express.Multer.File[] : [];
     if (uploadedFiles.length > 0) {
       const userInput = req.body.message;
@@ -19,7 +20,7 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
         const imageBuffer = fs.readFileSync(file.path);
         return { base64: imageBuffer.toString('base64'), mimeType: file.mimetype || 'image/jpeg' };
       });
-      const reply = await generateVisionResponse(userInput, images);
+      const reply = await generateVisionResponse(userInput, images, isVoiceMode);
       for (const file of uploadedFiles) { fs.unlinkSync(file.path); }
       res.json({ message: reply });
       return;
@@ -50,11 +51,11 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
         res.write(`data: ${JSON.stringify({ type: 'step', content: step })}\n\n`);
       };
 
-      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, onStep, pinnedFilesArray);
+      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, onStep, pinnedFilesArray, isVoiceMode);
       res.write(`data: ${JSON.stringify({ type: 'final', content: reply })}\n\n`);
       res.end();
     } else {
-      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, undefined, pinnedFilesArray);
+      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, undefined, pinnedFilesArray, isVoiceMode);
       res.json({ message: reply });
     }
   } catch (error) {
