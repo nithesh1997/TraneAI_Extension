@@ -109,6 +109,47 @@ export async function editFile(
 	return `[EDIT_PROPOSAL]\nfile: ${uri.fsPath}\nold: |\n${oldText}\nnew: |\n${newText}\nstatus: ready\nmessage: Targeted edit proposal\n[END_EDIT]`;
 }
 
+/** Fuzzy find needle in haystack with fallback strategies */
+function fuzzyFindIndex(haystack: string, needle: string): number {
+	// 1 – exact match
+	const idx = haystack.indexOf(needle);
+	if (idx !== -1) return idx;
+
+	// 2 – line-based fuzzy (handles whitespace/indentation differences)
+	const hLines = haystack.split('\n');
+	const nLines = needle.split('\n');
+	if (nLines.length === 0) return -1;
+
+	const normHLines = hLines.map(l => l.trimEnd().replace(/[ \t]+/g, ' '));
+	const normNLines = nLines.map(l => l.trimEnd().replace(/[ \t]+/g, ' '));
+
+	const firstLine = normNLines[0];
+	if (!firstLine) return -1;
+
+	let bestScore = -1;
+	let bestStart = -1;
+	for (let i = 0; i < normHLines.length; i++) {
+		if (normHLines[i] === firstLine) {
+			let score = 0;
+			for (let j = 0; j < normNLines.length && i + j < normHLines.length; j++) {
+				if (normHLines[i + j] === normNLines[j]) score++;
+				else if (normHLines[i + j].includes(normNLines[j]) || normNLines[j].includes(normHLines[i + j])) score += 0.5;
+			}
+			if (score > bestScore) { bestScore = score; bestStart = i; }
+		}
+	}
+
+	if (bestStart === -1 || bestScore < Math.max(1, nLines.length * 0.3)) return -1;
+
+	let charIdx = 0;
+	for (let i = 0; i < bestStart; i++) {
+		const nextIdx = haystack.indexOf('\n', charIdx);
+		if (nextIdx === -1) return -1;
+		charIdx = nextIdx + 1;
+	}
+	return charIdx;
+}
+
 export async function editFileByPath(
 	filePath: string,
 	oldText: string,
@@ -130,11 +171,16 @@ export async function editFileByPath(
 		const doc = await vscode.workspace.openTextDocument(uri);
 		const fullText = doc.getText();
 		
-		if (!fullText.includes(oldText)) {
-			return 'Error: Text not found in file';
+		// Use fuzzy matching to find the old text
+		const matchIdx = fuzzyFindIndex(fullText, oldText);
+		if (matchIdx === -1) {
+			return 'Error: Text not found in file. Try reading the file first to get the exact content.';
 		}
 		
-		return editFile(uri, oldText, newText);
+		// Extract the actual matched text (preserves original whitespace)
+		const actualOldText = fullText.substring(matchIdx, matchIdx + oldText.length);
+		
+		return editFile(uri, actualOldText, newText);
 	} catch (error: any) {
 		return `Error: ${error.message || 'Failed to edit file'}`;
 	}

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import { ChatRequest, QuickActionRequest } from '../types/index.js';
-import { generateAIResponse, generateVisionResponse } from '../services/aiService.js';
+import { generateAIResponse } from '../services/aiService.js';
 import { generateExplanation, generateReview, generateTests } from '../services/codeAnalysisService.js';
 
 export async function handleChatMessage(req: Request, res: Response): Promise<void> {
@@ -9,20 +9,13 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
 
   try {
     const uploadedFiles = Array.isArray(req.files) ? req.files as Express.Multer.File[] : [];
+
+    let images: { base64: string; mimeType: string }[] | undefined;
     if (uploadedFiles.length > 0) {
-      const userInput = req.body.message;
-      if (!userInput) {
-        res.status(400).json({ error: 'Message required with image' });
-        return;
-      }
-      const images = uploadedFiles.map(file => {
+      images = uploadedFiles.map(file => {
         const imageBuffer = fs.readFileSync(file.path);
         return { base64: imageBuffer.toString('base64'), mimeType: file.mimetype || 'image/jpeg' };
       });
-      const reply = await generateVisionResponse(userInput, images);
-      for (const file of uploadedFiles) { fs.unlinkSync(file.path); }
-      res.json({ message: reply });
-      return;
     }
 
     const { message, model, context, workspaceRoot, pinnedFiles } = req.body as ChatRequest;
@@ -50,12 +43,17 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
         res.write(`data: ${JSON.stringify({ type: 'step', content: step })}\n\n`);
       };
 
-      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, onStep, pinnedFilesArray);
+      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, onStep, pinnedFilesArray, images);
       res.write(`data: ${JSON.stringify({ type: 'final', content: reply })}\n\n`);
       res.end();
     } else {
-      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, undefined, pinnedFilesArray);
+      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, undefined, pinnedFilesArray, images);
       res.json({ message: reply });
+    }
+
+    // Clean up uploaded image files
+    for (const file of uploadedFiles) {
+      try { fs.unlinkSync(file.path); } catch {}
     }
   } catch (error) {
     console.error('Chat error:', error);

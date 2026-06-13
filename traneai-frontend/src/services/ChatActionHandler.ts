@@ -130,6 +130,7 @@ export class ChatActionHandler {
                 return;
             }
             
+            // Resolve all URIs first
             const editsByUri = new Map<string, { uri: vscode.Uri; proposals: EditProposal[] }>();
             
             for (const edit of edits) {
@@ -152,61 +153,107 @@ export class ChatActionHandler {
                 editsByUri.get(uriStr)!.proposals.push(edit);
             }
 
-            let totalApplied = 0;
-            let errors: string[] = [];
+            // Build a single atomic WorkspaceEdit for ALL changes
+            const atomicEdit = new vscode.WorkspaceEdit();
+            const documentsToSave: Set<string> = new Set();
+            let allResolved = true;
+            let resolveErrors: string[] = [];
 
             for (const { uri, proposals } of editsByUri.values()) {
-                try {
-                    let fileAppliedCount = 0;
-                    
-                    for (const prop of proposals) {
-                        const doc = await vscode.workspace.openTextDocument(uri);
-                        const currentContent = doc.getText();
-                        
-                        const startIndex = currentContent.indexOf(prop.oldContent);
-                        if (startIndex === -1) {
-                            errors.push(`Could not find exact text in ${prop.filePath}. It might have been changed by a previous edit.`);
-                            continue;
-                        }
-                        
-                        const workspaceEdit = new vscode.WorkspaceEdit();
-                        const range = new vscode.Range(
-                            doc.positionAt(startIndex), 
-                            doc.positionAt(startIndex + prop.oldContent.length)
-                        );
-                        workspaceEdit.replace(uri, range, prop.newContent);
-                        
-                        const success = await vscode.workspace.applyEdit(workspaceEdit);
-                        if (success) {
-                            fileAppliedCount++;
-                            totalApplied++;
-                        } else {
-                            errors.push(`VS Code rejected an edit for ${prop.filePath}.`);
-                        }
+                const doc = await vscode.workspace.openTextDocument(uri);
+                const currentContent = doc.getText();
+
+                for (const prop of proposals) {
+                    // Use fuzzy matching to find the old text location
+                    const startIndex = this.fuzzyFindIndex(currentContent, prop.oldContent);
+                    if (startIndex === -1) {
+                        resolveErrors.push(`Could not find text in ${prop.filePath}. Try reading the file first.`);
+                        allResolved = false;
+                        continue;
                     }
 
-                    if (fileAppliedCount > 0) {
-                        const finalDoc = await vscode.workspace.openTextDocument(uri);
-                        await finalDoc.save();
-                    }
-                } catch (err: any) {
-                    errors.push(`Failed to process ${uri.fsPath}: ${err.message}`);
+                    const range = new vscode.Range(
+                        doc.positionAt(startIndex), 
+                        doc.positionAt(startIndex + prop.oldContent.length)
+                    );
+                    atomicEdit.replace(uri, range, prop.newContent);
+                    documentsToSave.add(uri.toString());
                 }
             }
 
-            this.provider.broadcastTyping(false);
-            
-            if (errors.length > 0 && totalApplied === 0) {
-                this.provider.addMessage('ai', `❌ Failed to apply edits:\n${errors.join('\n')}`);
-            } else if (errors.length > 0) {
-                this.provider.addMessage('ai', `⚠️ Partially applied ${totalApplied} change(s), but encountered some issues:\n${errors.join('\n')}\n\n[Checkpoint: ${checkpointId}]`);
-            } else {
-                this.provider.addMessage('ai', `✅ Successfully applied all ${totalApplied} change(s). [Checkpoint: ${checkpointId}]`);
+            if (!allResolved) {
+                // Rollback: revert the checkpoint we created
+                await this.provider.checkpointManager.revertCheckpoint(checkpointId);
+                this.provider.broadcastTyping(false);
+                this.provider.addMessage('ai', `❌ Failed to resolve all edits:\n${resolveErrors.join('\n')}\n\nChanges rolled back.`);
+                return;
             }
+
+            // Apply ALL edits in a single atomic operation
+            const applied = await vscode.workspace.applyEdit(atomicEdit);
+            
+            if (!applied) {
+                // Rollback on failure
+                await this.provider.checkpointManager.revertCheckpoint(checkpointId);
+                this.provider.broadcastTyping(false);
+                this.provider.addMessage('ai', '❌ VS Code rejected the edit. Changes rolled back.');
+                return;
+            }
+
+            // Save all modified documents
+            for (const uriStr of documentsToSave) {
+                try {
+                    const saveUri = vscode.Uri.parse(uriStr);
+                    const doc = await vscode.workspace.openTextDocument(saveUri);
+                    await doc.save();
+                } catch { /* best-effort save */ }
+            }
+
+            this.provider.broadcastTyping(false);
+            const fileCount = editsByUri.size;
+            this.provider.addMessage('ai', `✅ Successfully applied ${edits.length} change(s) across ${fileCount} file(s). [Checkpoint: ${checkpointId}]`);
         } catch (error: any) {
             this.provider.broadcastTyping(false);
             this.provider.addMessage('ai', `❌ Error: ${error.message}`);
         }
+    }
+
+    /** Fuzzy find needle in haystack (line-based fallback) */
+    private fuzzyFindIndex(haystack: string, needle: string): number {
+        const idx = haystack.indexOf(needle);
+        if (idx !== -1) return idx;
+
+        const hLines = haystack.split('\n');
+        const nLines = needle.split('\n');
+        if (nLines.length === 0) return -1;
+
+        const normHLines = hLines.map(l => l.trimEnd().replace(/[ \t]+/g, ' '));
+        const normNLines = nLines.map(l => l.trimEnd().replace(/[ \t]+/g, ' '));
+        const firstLine = normNLines[0];
+        if (!firstLine) return -1;
+
+        let bestScore = -1;
+        let bestStart = -1;
+        for (let i = 0; i < normHLines.length; i++) {
+            if (normHLines[i] === firstLine) {
+                let score = 0;
+                for (let j = 0; j < normNLines.length && i + j < normHLines.length; j++) {
+                    if (normHLines[i + j] === normNLines[j]) score++;
+                    else if (normHLines[i + j].includes(normNLines[j]) || normNLines[j].includes(normHLines[i + j])) score += 0.5;
+                }
+                if (score > bestScore) { bestScore = score; bestStart = i; }
+            }
+        }
+
+        if (bestStart === -1 || bestScore < Math.max(1, nLines.length * 0.3)) return -1;
+
+        let charIdx = 0;
+        for (let i = 0; i < bestStart; i++) {
+            const nextIdx = haystack.indexOf('\n', charIdx);
+            if (nextIdx === -1) return -1;
+            charIdx = nextIdx + 1;
+        }
+        return charIdx;
     }
 
     public async handleRevertEdit(filePath: string, oldText: string, newText: string) {

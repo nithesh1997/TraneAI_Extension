@@ -2,20 +2,23 @@ import { AzureOpenAI } from 'openai';
 import { handleZenflowMessage } from './zenflowService';
 import { MODE_DUMMY_RESPONSES } from './constants';
 import { AI_TOOLS } from './tools';
-import { listFiles, readFile, createFile, writeFile, editFile, analyzeCode } from './fileOperations';
+import { listFiles, readFile, createFile, writeFile, editFile, multiFileEdit, fuzzyFindFile, analyzeCode } from './fileOperations';
 import { runCommand } from './commandRunner';
 import { WorkspaceIndexer } from './workspaceIndexer';
 import { IntentClassifier, Intent } from './intentClassifier';
+import { ContextInjector } from './contextService';
 
 const indexers: Map<string, WorkspaceIndexer> = new Map();
+const contextInjectors: Map<string, ContextInjector> = new Map();
 const classifier = new IntentClassifier();
 
-const getEnhancedSystemPrompt = (wsRoot?: string, indexSummary?: string, intent?: Intent) => `You are TraneAI, an advanced AI software engineering assistant developed by Trane Technologies.
+const getEnhancedSystemPrompt = (wsRoot?: string, indexSummary?: string, intent?: Intent, contextSnippets?: string) => `You are TraneAI, an advanced AI software engineering assistant developed by Trane Technologies.
 
 ## Current Goal: ${intent || 'General Assistance'}
 
 ## Project Context
 ${indexSummary || 'No workspace index available.'}
+${contextSnippets || ''}
 
 ## Identity & Tone
 - You are a professional software engineer.
@@ -70,7 +73,7 @@ ${indexSummary || 'No workspace index available.'}
 
 ### edit_file (PREFERRED for edits)
 - Makes targeted, minimal changes to existing files
-- Replaces ONLY the exact text you specify
+- Uses smart matching: can handle minor whitespace and formatting differences
 - Preserves all other code, formatting, and whitespace
 - Always use this for: renaming, small changes, single function edits
 
@@ -83,6 +86,13 @@ ${indexSummary || 'No workspace index available.'}
 - Executes shell commands in workspace
 - Use for: git, npm, yarn, pnpm, ng, docker, python, etc.
 - Returns actual command output
+
+### fuzzy_find_file
+- Fuzzy search for files by partial name
+- Use when you know part of a filename but not the full path
+- Returns ranked results (best matches first)
+- Example: "userServ" finds "userService.ts"
+- Faster than manually exploring directories with list_files
 
 ## Critical Rules
 1. **ALWAYS read a file before modifying it** - Use read_file first
@@ -101,15 +111,15 @@ ${indexSummary || 'No workspace index available.'}
 3. Provide clear explanation
 
 ### "Edit/Modify/Change code" (CRITICAL)
-1. Use read_file first to get EXACT current content
-2. Use edit_file with EXACT oldString matching the file
-3. ONLY change what was requested - do NOT:
+1. Use read_file first to get exact current content
+2. Use edit_file with oldString matching the section you want to change
+3. The edit_file tool uses smart matching — minor whitespace/indentation differences are OK
+4. ONLY change what was requested - do NOT:
    - Reformat or re-indent code
    - Change unrelated functions
    - Add or remove extra whitespace
    - Modify code that wasn't asked to change
-4. Keep all existing formatting, comments, and structure
-5. Match the EXACT indentation and spacing in the file
+5. Keep all existing formatting, comments, and structure
 
 ### "Create a new file"
 1. Prepare the complete content
@@ -143,7 +153,8 @@ export async function generateAIResponse(
   workspaceRoot?: string,
   model?: string,
   onStep?: (step: string) => void,
-  pinnedFiles: string[] = []
+  pinnedFiles: string[] = [],
+  images?: { base64: string; mimeType: string }[]
 ): Promise<string> {
   const client = new AzureOpenAI({
     apiKey: process.env.AZURE_OPENAI_API_KEY,
@@ -158,6 +169,7 @@ export async function generateAIResponse(
 
   let indexSummary = '';
   let pinnedContext = '';
+  let contextSnippets = '';
 
   if (workspaceRoot) {
     if (!indexers.has(workspaceRoot)) {
@@ -165,6 +177,19 @@ export async function generateAIResponse(
       await indexers.get(workspaceRoot)!.indexWorkspace();
     }
     indexSummary = indexers.get(workspaceRoot)!.getContextForPrompt();
+
+    // Build BM25 context injector if not already
+    if (!contextInjectors.has(workspaceRoot)) {
+      const injector = new ContextInjector();
+      await injector.buildIndex(workspaceRoot);
+      contextInjectors.set(workspaceRoot, injector);
+    }
+
+    // Get relevant context from user's message (BM25 search)
+    const injector = contextInjectors.get(workspaceRoot);
+    if (injector) {
+      contextSnippets = injector.getRelevantContext(message, 5);
+    }
 
     // Load content of pinned files
     if (pinnedFiles.length > 0) {
@@ -186,13 +211,23 @@ export async function generateAIResponse(
   // High-reliability mode: Force tool use for coding tasks to ensure HITL approval
   const forceTool = intent === Intent.EDIT_FILE || intent === Intent.MULTI_FILE_EDIT || intent === Intent.REFACTOR || intent === Intent.FIX_ERROR;
 
+  const userContent: any = images && images.length > 0
+    ? [
+        { type: 'text', text: message },
+        ...images.map(img => ({
+          type: 'image_url' as const,
+          image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
+        })),
+      ]
+    : message;
+
   const messages: any[] = [
     {
       role: 'system',
-      content: getEnhancedSystemPrompt(workspaceRoot, indexSummary, intent) + pinnedContext,
+      content: getEnhancedSystemPrompt(workspaceRoot, indexSummary, intent, contextSnippets) + pinnedContext,
     },
     ...(history || []),
-    { role: 'user', content: message }
+    { role: 'user', content: userContent }
   ];
 
   let toolChoice: any = 'auto';
@@ -262,17 +297,14 @@ export async function generateAIResponse(
       } else if (functionName === 'edit_file') {
         functionResponse = await editFile(functionArgs.filePath, functionArgs.oldString, functionArgs.newString, workspaceRoot);
       } else if (functionName === 'multi_file_edit') {
-        const results = [];
-        for (const change of functionArgs.changes) {
-          const result = await editFile(change.filePath, change.oldString, change.newString, workspaceRoot);
-          results.push(result);
-        }
-        functionResponse = results.join('\n\n');
+        functionResponse = await multiFileEdit(functionArgs.changes, workspaceRoot);
       } else if (functionName === 'analyze_code') {
         functionResponse = await analyzeCode(functionArgs.filePath, workspaceRoot);
       } else if (functionName === 'run_command') {
         const proposal = await runCommand(functionArgs.command, workspaceRoot);
         functionResponse = proposal;
+      } else if (functionName === 'fuzzy_find_file') {
+        functionResponse = await fuzzyFindFile(functionArgs.query, workspaceRoot, functionArgs.max_results);
       }
 
       if (functionName === 'edit_file' || functionName === 'multi_file_edit' || functionName === 'create_file' || functionName === 'write_file' || functionName === 'run_command') {
@@ -338,33 +370,4 @@ export async function generateAIResponse(
 return `${blockMarkers}\n\n${finalContent}`;
 }
 
-export async function generateVisionResponse(
-  message: string,
-  images: { base64: string; mimeType: string }[]
-): Promise<string> {
 
-  const client = new AzureOpenAI({
-    apiKey: process.env.AZURE_OPENAI_API_KEY,
-    endpoint: process.env.AZURE_OPENAI_ENDPOINT,
-    deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
-    apiVersion: '2024-02-15-preview',
-  });
-
-  const imageContent = images.map(img => ({
-    type: "image_url" as const,
-    image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
-  }));
-
-  const response = await client.chat.completions.create({
-    model: process.env.AZURE_OPENAI_DEPLOYMENT!,
-    messages: [
-      {
-        role: 'system',
-        content: 'You are TraneAI, a professional software engineer. Analyze the provided images and provide direct, helpful technical guidance.',
-      },
-      { role: 'user', content: [{ type: 'text', text: message }, ...imageContent] as any }
-    ],
-  });
-
-  return response.choices[0].message.content || '';
-}

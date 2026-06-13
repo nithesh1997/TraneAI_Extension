@@ -45,7 +45,7 @@ export const AI_TOOLS = [
     type: 'function' as const,
     function: {
       name: 'edit_file',
-      description: 'Make targeted, minimal edits to a specific section of an existing file. Use this to change specific text, rename identifiers, or modify small code sections. ALWAYS use this for edits - never use write_file for modifications. Only modifies the exact text you specify - preserves all other code, formatting, and whitespace.',
+      description: 'Make targeted, minimal edits to a specific section of an existing file. Uses smart matching so minor whitespace/indentation differences are OK. ALWAYS use this for edits - never use write_file for modifications. Only modifies the exact section you specify - preserves all other code, formatting, and whitespace.',
       parameters: {
         type: 'object',
         properties: {
@@ -69,6 +69,21 @@ export const AI_TOOLS = [
           content: { type: 'string', description: 'The complete new content for the file' },
         },
         required: ['filePath', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'fuzzy_find_file',
+      description: 'Fuzzy find files by partial name match. Use to quickly locate files when you know part of the filename but not the full path. E.g. "userServ" finds "userService.ts", "app.comp" finds "app.component.ts". Returns up to 15 matching file paths ranked by relevance.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Partial filename to search for (e.g., "userServ", "app.comp", "style")' },
+          max_results: { type: 'number', description: 'Maximum number of results to return (default: 15)' },
+        },
+        required: ['query'],
       },
     },
   },

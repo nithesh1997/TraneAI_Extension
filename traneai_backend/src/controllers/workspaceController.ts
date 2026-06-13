@@ -88,6 +88,13 @@ export async function getWorkspaceBranches(req: Request, res: Response): Promise
             return;
         }
 
+        // Check if it's a git repo first to avoid noisy errors
+        const gitDir = path.join(root, '.git');
+        if (!fs.existsSync(gitDir)) {
+            res.json([]);
+            return;
+        }
+
         const { stdout } = await execAsync('git branch -a', { cwd: root });
         const branches = stdout
             .split('\n')
