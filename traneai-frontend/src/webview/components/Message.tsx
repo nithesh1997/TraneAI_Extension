@@ -188,13 +188,13 @@ const renderMarkdown = (text: string): string => {
 		if (match.index > lastIndex) {
 			parts.push(processInlineMarkdown(text.substring(lastIndex, match.index)));
 		}
-		const lang = match[1] || 'plaintext';
+		const lang = (match[1] || 'plaintext').trim() || 'plaintext';
 		const code = match[2]
 			.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 		parts.push(
-			`<div class="md-code-block">` +
-			`<div class="md-code-header"><span class="md-code-lang">${lang}</span></div>` +
-			`<pre><code class="language-${lang}">${code}</code></pre>` +
+			`<div class="code-palette">` +
+			`<div class="code-palette-header"><span class="code-palette-lang">${lang}</span></div>` +
+			`<div class="code-palette-body"><pre><code class="language-${lang}">${code}</code></pre></div>` +
 			`</div>`
 		);
 		lastIndex = codeBlockRegex.lastIndex;

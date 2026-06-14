@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import fs from 'fs';
 import { ChatRequest, QuickActionRequest } from '../types/index.js';
 import { generateAIResponse } from '../services/aiService.js';
-import { generateExplanation, generateReview, generateTests } from '../services/codeAnalysisService.js';
+import { generateDeepExplanation, formatDeepExplanation, generateExplanation, generateReview, generateTests } from '../services/codeAnalysisService.js';
 
 export async function handleChatMessage(req: Request, res: Response): Promise<void> {
   const isStream = req.query.stream === 'true';
@@ -81,7 +81,8 @@ export async function handleQuickAction(req: Request, res: Response): Promise<vo
 
     switch (action) {
       case 'explain':
-        responseText = generateExplanation(fileName, language, content, lineCount);
+        const deepExplanation = generateDeepExplanation(fileName, language, content, lineCount);
+        responseText = formatDeepExplanation(fileName, language, lineCount, deepExplanation);
         break;
       case 'review':
         responseText = generateReview(fileName, language, content, lineCount);

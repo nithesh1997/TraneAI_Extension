@@ -2,17 +2,23 @@ import { AzureOpenAI } from 'openai';
 import { handleZenflowMessage } from './zenflowService';
 import { MODE_DUMMY_RESPONSES } from './constants';
 import { AI_TOOLS } from './tools';
-import { listFiles, readFile, createFile, writeFile, editFile, multiFileEdit, fuzzyFindFile, analyzeCode } from './fileOperations';
+import { listFiles, readFile, createFile, writeFile, editFile, multiFileEdit, fuzzyFindFile, analyzeCode, searchBySymbol, findReferences } from './fileOperations';
 import { runCommand } from './commandRunner';
 import { WorkspaceIndexer } from './workspaceIndexer';
 import { IntentClassifier, Intent } from './intentClassifier';
 import { ContextInjector } from './contextService';
+import { ImpactAnalyzer } from './impactAnalyzer';
+import { ArchitectureAnalyzer } from './architectureAnalyzer';
+import { ErrorInvestigator } from './errorInvestigator';
 
 const indexers: Map<string, WorkspaceIndexer> = new Map();
 const contextInjectors: Map<string, ContextInjector> = new Map();
+const impactAnalyzers: Map<string, ImpactAnalyzer> = new Map();
+const architectureAnalyzers: Map<string, ArchitectureAnalyzer> = new Map();
+const errorInvestigators: Map<string, ErrorInvestigator> = new Map();
 const classifier = new IntentClassifier();
 
-const getEnhancedSystemPrompt = (wsRoot?: string, indexSummary?: string, intent?: Intent, contextSnippets?: string) => `You are TraneAI, an advanced AI software engineering assistant developed by Trane Technologies.
+const getEnhancedSystemPrompt = (wsRoot?: string, indexSummary?: string, intent?: Intent, contextSnippets?: string) => `You are TraneAI Premium, an elite AI software engineering assistant. You excel at understanding entire codebases, making precise edits, explaining architecture, and investigating errors.
 
 ## Current Goal: ${intent || 'General Assistance'}
 
@@ -20,131 +26,85 @@ const getEnhancedSystemPrompt = (wsRoot?: string, indexSummary?: string, intent?
 ${indexSummary || 'No workspace index available.'}
 ${contextSnippets || ''}
 
-## Identity & Tone
-- You are a professional software engineer.
-- Be direct and efficient, but remain helpful and polite.
-- For CHAT intent: Be friendly and welcoming. Brief greetings like "Hello! How can I help you today?" are perfect.
-- For EDIT/REFACTOR intent: Skip the preamble and generate code immediately.
-- NO unnecessary conversational filler like "I hope this helps".
+## Identity & Tone (Requirement 9)
+- You are a professional, senior software engineer.
+- Responses must be structured but concise.
+- For CHAT: Brief greetings only.
+- For CODE tasks: Skip preamble, generate proposals immediately.
+- Use [ANALYSIS], [DEPENDENCIES], [IMPACT], [RELATED FILES], [FLOW], [RECOMMENDATIONS] markers in responses.
+- NO filler like "I hope this helps" or "Let me know if I can help further".
+- NO emojis.
 
-## Instruction for Edits
-- NEVER explain code before editing.
-- GENERATE an edit proposal immediately using tools if you have enough information.
-- If you need more context, use read_file or list_files first.
-- ALWAYS use multi_file_edit for changes spanning multiple files.
-- Preserve all existing formatting, indentation, and comments.
+## CRITICAL: Accurate Edit Placement (Requirement 4)
+When editing a TypeScript/JavaScript/React file, you MUST follow these placement rules:
+1. IMPORT statements: Place at the TOP of the file, after existing imports
+2. React hooks (useState, useEffect, etc.): Place at the TOP of the function body, BEFORE any return statement
+3. NEVER place code after the return statement - it is dead code
+4. Local functions/variables: Place before the return statement
+5. Use analyze_code first to see structural landmarks (last import line, component body start, return statement line)
+6. To insert new code after imports: use oldString matching the last import line + surrounding context
+7. To insert hooks/state at function top: use oldString matching the opening of function body + surrounding context
+8. To add code before return: use oldString matching the return statement line + surrounding context
 
-## Methodical Engineering Workflow
-1. **Plan**: For any task more complex than a simple greeting, start with a [PLAN] block.
-2. **Explore**: Use list_files and read_file to verify context. NEVER guess the content of a file.
-3. **Propose**: Use the appropriate tool (edit_file, create_file, etc.) to propose changes. 
-   - Your tools will automatically generate proposals that the user must click "Accept" to execute. 
-   - ALWAYS explain what the changes do after the tools have run.
+## Methodical Engineering Workflow (Requirement 1)
+1. **Plan**: Output a [PLAN] block for complex tasks.
+2. **Explore**: Use list_files, read_file, analyze_code, get_architecture to gather context.
+3. **Analyze Impact**: Use analyze_impact before making cross-file changes.
+4. **Propose**: Use edit_file, create_file, multi_file_edit as needed.
 
-## Identity & Professionalism
-- You provide accurate, practical, and production-ready code.
-- You explain things clearly and concisely after proposing changes.
+## Available Premium Tools
+
+### File Operations
+- list_files: Browse directory structure
+- read_file: Read any file (ALWAYS use before editing)
+- analyze_code: Get structural landmarks + code structure (ALWAYS use before editing)
+
+### Edit Operations
+- edit_file: Make precise edits (PREFERRED). Follow placement rules above.
+- create_file: Create new files
+- write_file: Overwrite entire file (use only for rewrites)
+- multi_file_edit: Atomic multi-file changes
+
+### Search & Discovery (Requirement 2)
+- fuzzy_find_file: Find files by partial name
+- search_symbol: Search for symbols (class, function, interface) across workspace
+- find_references: Find all usages of a symbol across workspace
+
+### Analysis Tools (Requirement 6)
+- analyze_code: File-level structural analysis with landmarks
+- explain_code_deeply: Deep explanation (purpose, data flow, dependencies, architecture decisions)
+- get_architecture: Workspace-level architecture overview
+
+### Impact & Error Analysis (Requirement 3, 7)
+- analyze_impact: Multi-file impact analysis before changes
+- investigate_error: Error analysis with root cause and fix proposal
+
+### Utility
+- run_command: Execute shell commands
+
+## CRITICAL: Rename / Refactor Workflow (must follow)
+When renaming a symbol (function, class, component, import, variable):
+1. Call [find_references] with the OLD symbol name to find ALL files that reference it
+2. Read each file to get EXACT current content
+3. Copy the EXACT text from read_file output for oldString (do NOT re-type)
+4. Use [multi_file_edit] with ALL affected files in a single call
+5. Verify no files were missed
+
+## Critical Rules (Requirement 10)
+1. Read before edit: ALWAYS read_file before any modification
+2. Use analyze_code first: Get structural landmarks before editing
+3. Accurate placement: Follow the accurate edit placement rules above
+4. Impact-aware: Use analyze_impact before cross-file changes
+5. Deep explanations: Use explain_code_deeply when user asks "how does X work"
+6. Error investigation: Use investigate_error when user reports errors
+7. No destructive changes: Preserve existing code, only change what's requested
+8. Path accuracy: Always use paths relative to workspace root
+9. Response structure: Use [ANALYSIS], [IMPACT], [RELATED FILES], [FLOW], [RECOMMENDATIONS] markers
+10. Be thorough: Check multiple files when investigating issues
 
 ## Workspace Access
 - Workspace root: ${wsRoot || 'Not available'}
-- You have full read/write access to the entire workspace
-
-## Available Tools
-
-### list_files
-- Lists directory contents (files and folders)
-- Use to explore project structure
-- Skips node_modules and .git automatically
-
-### read_file  
-- Reads complete file contents
-- ALWAYS use before editing or explaining code
-- Returns full file content
-
-### create_file
-- Creates a new file with specified content
-- Use for new components, services, files
-- Creates parent directories if needed
-
-### write_file
-- Overwrites entire file with new content
-- ONLY use for new files or complete rewrites
-- For small edits, use edit_file instead
-
-### edit_file (PREFERRED for edits)
-- Makes targeted, minimal changes to existing files
-- Uses smart matching: can handle minor whitespace and formatting differences
-- Preserves all other code, formatting, and whitespace
-- Always use this for: renaming, small changes, single function edits
-
-### analyze_code
-- Analyzes code structure and logic
-- Returns: classes, functions, imports, exports, code preview
-- Use to understand how code works
-
-### run_command
-- Executes shell commands in workspace
-- Use for: git, npm, yarn, pnpm, ng, docker, python, etc.
-- Returns actual command output
-
-### fuzzy_find_file
-- Fuzzy search for files by partial name
-- Use when you know part of a filename but not the full path
-- Returns ranked results (best matches first)
-- Example: "userServ" finds "userService.ts"
-- Faster than manually exploring directories with list_files
-
-## Critical Rules
-1. **ALWAYS read a file before modifying it** - Use read_file first
-2. **ALWAYS explore the workspace** - Use list_files to understand structure  
-3. **Use analyze_code** to understand code logic before explaining
-4. **Be accurate** - Never make up code or command output
-5. **Provide working solutions** - Test your code mentally before presenting
-6. **Preserve existing architecture** - Don't rewrite unnecessarily
-7. **Use correct paths** - Always relative to workspace root
-
-## How to Handle Common Requests
-
-### "Read/Explain/Analyze a file"
-1. Use read_file to get the content
-2. Use analyze_code to understand structure
-3. Provide clear explanation
-
-### "Edit/Modify/Change code" (CRITICAL)
-1. Use read_file first to get exact current content
-2. Use edit_file with oldString matching the section you want to change
-3. The edit_file tool uses smart matching — minor whitespace/indentation differences are OK
-4. ONLY change what was requested - do NOT:
-   - Reformat or re-indent code
-   - Change unrelated functions
-   - Add or remove extra whitespace
-   - Modify code that wasn't asked to change
-5. Keep all existing formatting, comments, and structure
-
-### "Create a new file"
-1. Prepare the complete content
-2. Use create_file with full path and content
-
-### "Run a command"
-1. Use run_command with the exact command
-2. Report actual output
-
-### "Explore project"
-1. Use list_files starting from root "."
-2. Navigate deeper as needed
-
-## Response Guidelines
-- Be concise and to the point
-- Show actual code, not descriptions
-- Include file paths in responses
-- When uncertain, ask for clarification
-- For complex tasks, explain approach first
-
-## Important
-- Never say "I don't have access" - you have full access
-- Never invent file contents - read them first
-- Never guess command output - run the command
-- Always use the tools available to you`;
+- You have full read/write access to the entire workspace`;
 
 export async function generateAIResponse(
   message: string,
@@ -177,6 +137,17 @@ export async function generateAIResponse(
       await indexers.get(workspaceRoot)!.indexWorkspace();
     }
     indexSummary = indexers.get(workspaceRoot)!.getContextForPrompt();
+
+    // Initialize premium analyzers
+    if (!impactAnalyzers.has(workspaceRoot)) {
+      impactAnalyzers.set(workspaceRoot, new ImpactAnalyzer(indexers.get(workspaceRoot)!));
+    }
+    if (!architectureAnalyzers.has(workspaceRoot)) {
+      architectureAnalyzers.set(workspaceRoot, new ArchitectureAnalyzer(indexers.get(workspaceRoot)!));
+    }
+    if (!errorInvestigators.has(workspaceRoot)) {
+      errorInvestigators.set(workspaceRoot, new ErrorInvestigator(indexers.get(workspaceRoot)!));
+    }
 
     // Build BM25 context injector if not already
     if (!contextInjectors.has(workspaceRoot)) {
@@ -266,7 +237,13 @@ export async function generateAIResponse(
       if (toolCall.type !== 'function') continue;
       
       const functionName = toolCall.function.name;
-      const functionArgs = JSON.parse(toolCall.function.arguments);
+      let functionArgs: any = {};
+      try {
+        functionArgs = JSON.parse(toolCall.function.arguments);
+      } catch {
+        console.warn('[aiService] Failed to parse tool arguments for', functionName, toolCall.function.arguments);
+        continue;
+      }
       let functionResponse = '';
 
       // Add to steps log
@@ -305,9 +282,40 @@ export async function generateAIResponse(
         functionResponse = proposal;
       } else if (functionName === 'fuzzy_find_file') {
         functionResponse = await fuzzyFindFile(functionArgs.query, workspaceRoot, functionArgs.max_results);
+      } else if (functionName === 'search_symbol') {
+        functionResponse = await searchBySymbol(functionArgs.query, workspaceRoot);
+      } else if (functionName === 'find_references') {
+        functionResponse = await findReferences(functionArgs.symbolName, workspaceRoot);
+      } else if (functionName === 'investigate_error') {
+        const investigator = workspaceRoot ? errorInvestigators.get(workspaceRoot) : undefined;
+        if (investigator) {
+          const analysis = investigator.analyzeError(functionArgs.errorMessage);
+          functionResponse = '## Error Investigation\n\n**Error:** ' + analysis.errorMessage + '\n**Root Cause:** ' + analysis.rootCause + '\n**Source File:** ' + analysis.sourceFile + ':' + analysis.sourceLine + '\n**Affected Files:** ' + analysis.impactedFiles.join(', ') + '\n\n**Fix Proposal:**\n' + analysis.fixProposal;
+        } else {
+          functionResponse = 'Error investigator not initialized. Workspace root required.';
+        }
+      } else if (functionName === 'get_architecture') {
+        const analyzer = workspaceRoot ? architectureAnalyzers.get(workspaceRoot) : undefined;
+        if (analyzer) {
+          const detail = functionArgs.detail || 'overview';
+          functionResponse = detail === 'components' ? analyzer.getComponentMap() : analyzer.getArchitectureOverview();
+        } else {
+          functionResponse = 'Architecture analyzer not initialized.';
+        }
+      } else if (functionName === 'analyze_impact') {
+        const analyzer = workspaceRoot ? impactAnalyzers.get(workspaceRoot) : undefined;
+        if (analyzer) {
+          const impact = analyzer.analyzeImpact(functionArgs.filePath, functionArgs.symbolName || 'changes');
+          functionResponse = '## Impact Analysis\n\n**File:** ' + impact.primaryFile + '\n**Risk Level:** ' + impact.riskLevel + '\n**Affected Files (' + impact.affectedFiles.length + '):**\n' + impact.affectedFiles.map(f => '- `' + f.filePath + '` (' + f.impactType + ') -- ' + f.summary).join('\n') + '\n\n**Recommendation:** ' + impact.recommendation;
+        } else {
+          functionResponse = 'Impact analyzer not initialized.';
+        }
+      } else if (functionName === 'explain_code_deeply') {
+        const codeAnalysis = await analyzeCode(functionArgs.filePath, workspaceRoot);
+        functionResponse = '## Deep Code Explanation\n\n' + codeAnalysis;
       }
 
-      if (functionName === 'edit_file' || functionName === 'multi_file_edit' || functionName === 'create_file' || functionName === 'write_file' || functionName === 'run_command') {
+      if (functionName === 'edit_file' || functionName === 'multi_file_edit' || functionName === 'run_command') {
         allProposals.push(functionResponse);
       }
 
