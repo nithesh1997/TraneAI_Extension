@@ -109,45 +109,72 @@ export async function editFile(
 	return `[EDIT_PROPOSAL]\nfile: ${uri.fsPath}\nold: |\n${oldText}\nnew: |\n${newText}\nstatus: ready\nmessage: Targeted edit proposal\n[END_EDIT]`;
 }
 
-/** Fuzzy find needle in haystack with fallback strategies */
-function fuzzyFindIndex(haystack: string, needle: string): number {
-	// 1 – exact match
-	const idx = haystack.indexOf(needle);
-	if (idx !== -1) return idx;
+function fuzzyFindMatch(haystack: string, needle: string): { index: number, text: string } | null {
+	const exactIdx = haystack.indexOf(needle);
+	if (exactIdx !== -1) return { index: exactIdx, text: needle };
 
-	// 2 – line-based fuzzy (handles whitespace/indentation differences)
-	const hLines = haystack.split('\n');
-	const nLines = needle.split('\n');
-	if (nLines.length === 0) return -1;
+	const nNeedle = needle.replace(/["']/g, "'");
+	const nHaystack = haystack.replace(/["']/g, "'");
+	const qIdx = nHaystack.indexOf(nNeedle);
+	if (qIdx !== -1) return { index: qIdx, text: haystack.substring(qIdx, qIdx + needle.length) };
 
-	const normHLines = hLines.map(l => l.trimEnd().replace(/[ \t]+/g, ' '));
-	const normNLines = nLines.map(l => l.trimEnd().replace(/[ \t]+/g, ' '));
-
-	const firstLine = normNLines[0];
-	if (!firstLine) return -1;
-
-	let bestScore = -1;
-	let bestStart = -1;
-	for (let i = 0; i < normHLines.length; i++) {
-		if (normHLines[i] === firstLine) {
-			let score = 0;
-			for (let j = 0; j < normNLines.length && i + j < normHLines.length; j++) {
-				if (normHLines[i + j] === normNLines[j]) score++;
-				else if (normHLines[i + j].includes(normNLines[j]) || normNLines[j].includes(normHLines[i + j])) score += 0.5;
-			}
-			if (score > bestScore) { bestScore = score; bestStart = i; }
+	interface Char { char: string; index: number; }
+	const hChars: Char[] = [];
+	for (let i = 0; i < haystack.length; i++) {
+		if (!/\s/.test(haystack[i])) {
+			hChars.push({ char: haystack[i] === '"' ? "'" : haystack[i], index: i });
 		}
 	}
 
-	if (bestStart === -1 || bestScore < Math.max(1, nLines.length * 0.3)) return -1;
-
-	let charIdx = 0;
-	for (let i = 0; i < bestStart; i++) {
-		const nextIdx = haystack.indexOf('\n', charIdx);
-		if (nextIdx === -1) return -1;
-		charIdx = nextIdx + 1;
+	const nChars: string[] = [];
+	for (let i = 0; i < needle.length; i++) {
+		if (!/\s/.test(needle[i])) {
+			nChars.push(needle[i] === '"' ? "'" : needle[i]);
+		}
 	}
-	return charIdx;
+
+	if (nChars.length === 0) return null;
+
+	for (let i = 0; i <= hChars.length - nChars.length; i++) {
+		let match = true;
+		for (let j = 0; j < nChars.length; j++) {
+			if (hChars[i + j].char !== nChars[j]) {
+				match = false;
+				break;
+			}
+		}
+		if (match) {
+			let startIndex = hChars[i].index;
+			let endIndex = hChars[i + nChars.length - 1].index;
+
+			const leadingWsMatch = needle.match(/^(\s+)/);
+			if (leadingWsMatch) {
+				let hWsStart = startIndex;
+				while (hWsStart > 0 && /\s/.test(haystack[hWsStart - 1])) {
+					if (haystack[hWsStart - 1] === '\n' && !leadingWsMatch[1].includes('\n')) break;
+					hWsStart--;
+				}
+				startIndex = hWsStart;
+			}
+
+			const trailingWsMatch = needle.match(/(\s+)$/);
+			if (trailingWsMatch) {
+				let hWsEnd = endIndex;
+				while (hWsEnd < haystack.length - 1 && /\s/.test(haystack[hWsEnd + 1])) {
+					if (haystack[hWsEnd + 1] === '\n' && !trailingWsMatch[1].includes('\n')) break;
+					hWsEnd++;
+				}
+				endIndex = hWsEnd;
+			}
+
+			return {
+				index: startIndex,
+				text: haystack.substring(startIndex, endIndex + 1)
+			};
+		}
+	}
+
+	return null;
 }
 
 export async function editFileByPath(
@@ -171,14 +198,14 @@ export async function editFileByPath(
 		const doc = await vscode.workspace.openTextDocument(uri);
 		const fullText = doc.getText();
 		
-		// Use fuzzy matching to find the old text
-		const matchIdx = fuzzyFindIndex(fullText, oldText);
-		if (matchIdx === -1) {
+		// Use whitespace-agnostic fuzzy matching
+		const match = fuzzyFindMatch(fullText, oldText);
+		if (!match) {
 			return 'Error: Text not found in file. Try reading the file first to get the exact content.';
 		}
 		
 		// Extract the actual matched text (preserves original whitespace)
-		const actualOldText = fullText.substring(matchIdx, matchIdx + oldText.length);
+		const actualOldText = match.text;
 		
 		return editFile(uri, actualOldText, newText);
 	} catch (error: any) {

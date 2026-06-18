@@ -160,24 +160,53 @@ export class ChatActionHandler {
             let resolveErrors: string[] = [];
 
             for (const { uri, proposals } of editsByUri.values()) {
-                const doc = await vscode.workspace.openTextDocument(uri);
-                const currentContent = doc.getText();
+                let doc: vscode.TextDocument | undefined;
+                let currentContent = '';
+                let isNewFile = false;
+
+                try {
+                    doc = await vscode.workspace.openTextDocument(uri);
+                    currentContent = doc.getText();
+                } catch (e) {
+                    isNewFile = true;
+                }
 
                 for (const prop of proposals) {
-                    // Use fuzzy matching to find the old text location
-                    const startIndex = this.fuzzyFindIndex(currentContent, prop.oldContent);
-                    if (startIndex === -1) {
-                        resolveErrors.push(`Could not find text in ${prop.filePath}. Try reading the file first.`);
-                        allResolved = false;
-                        continue;
-                    }
+                    if (prop.oldContent.trim() === '') {
+                        // File creation or complete overwrite
+                        if (isNewFile) {
+                            atomicEdit.createFile(uri, { ignoreIfExists: true });
+                            atomicEdit.insert(uri, new vscode.Position(0, 0), prop.newContent);
+                        } else {
+                            const range = new vscode.Range(
+                                new vscode.Position(0, 0),
+                                doc!.positionAt(currentContent.length)
+                            );
+                            atomicEdit.replace(uri, range, prop.newContent);
+                        }
+                        documentsToSave.add(uri.toString());
+                    } else {
+                        if (isNewFile) {
+                            resolveErrors.push(`File ${prop.filePath} does not exist but edit expects old content.`);
+                            allResolved = false;
+                            continue;
+                        }
 
-                    const range = new vscode.Range(
-                        doc.positionAt(startIndex), 
-                        doc.positionAt(startIndex + prop.oldContent.length)
-                    );
-                    atomicEdit.replace(uri, range, prop.newContent);
-                    documentsToSave.add(uri.toString());
+                        // Use robust matching to find the old text location
+                        const match = this.fuzzyFindMatch(currentContent, prop.oldContent);
+                        if (!match) {
+                            resolveErrors.push(`Could not find text in ${prop.filePath}. Try reading the file first.`);
+                            allResolved = false;
+                            continue;
+                        }
+
+                        const range = new vscode.Range(
+                            doc!.positionAt(match.index), 
+                            doc!.positionAt(match.index + match.text.length)
+                        );
+                        atomicEdit.replace(uri, range, prop.newContent);
+                        documentsToSave.add(uri.toString());
+                    }
                 }
             }
 
@@ -218,43 +247,75 @@ export class ChatActionHandler {
         }
     }
 
-    /** Fuzzy find needle in haystack (line-based fallback) */
-    private fuzzyFindIndex(haystack: string, needle: string): number {
-        const idx = haystack.indexOf(needle);
-        if (idx !== -1) return idx;
+    /** Fuzzy find needle in haystack (whitespace-agnostic fallback) */
+    private fuzzyFindMatch(haystack: string, needle: string): { index: number, text: string } | null {
+        const exactIdx = haystack.indexOf(needle);
+        if (exactIdx !== -1) return { index: exactIdx, text: needle };
 
-        const hLines = haystack.split('\n');
-        const nLines = needle.split('\n');
-        if (nLines.length === 0) return -1;
+        const nNeedle = needle.replace(/["']/g, "'");
+        const nHaystack = haystack.replace(/["']/g, "'");
+        const qIdx = nHaystack.indexOf(nNeedle);
+        if (qIdx !== -1) return { index: qIdx, text: haystack.substring(qIdx, qIdx + needle.length) };
 
-        const normHLines = hLines.map(l => l.trimEnd().replace(/[ \t]+/g, ' '));
-        const normNLines = nLines.map(l => l.trimEnd().replace(/[ \t]+/g, ' '));
-        const firstLine = normNLines[0];
-        if (!firstLine) return -1;
-
-        let bestScore = -1;
-        let bestStart = -1;
-        for (let i = 0; i < normHLines.length; i++) {
-            if (normHLines[i] === firstLine) {
-                let score = 0;
-                for (let j = 0; j < normNLines.length && i + j < normHLines.length; j++) {
-                    if (normHLines[i + j] === normNLines[j]) score++;
-                    else if (normHLines[i + j].includes(normNLines[j]) || normNLines[j].includes(normHLines[i + j])) score += 0.5;
-                }
-                if (score > bestScore) { bestScore = score; bestStart = i; }
+        interface Char { char: string; index: number; }
+        const hChars: Char[] = [];
+        for (let i = 0; i < haystack.length; i++) {
+            if (!/\s/.test(haystack[i])) {
+                hChars.push({ char: haystack[i] === '"' ? "'" : haystack[i], index: i });
             }
         }
 
-        if (bestStart === -1 || bestScore < Math.max(1, nLines.length * 0.3)) return -1;
-
-        let charIdx = 0;
-        for (let i = 0; i < bestStart; i++) {
-            const nextIdx = haystack.indexOf('\n', charIdx);
-            if (nextIdx === -1) return -1;
-            charIdx = nextIdx + 1;
+        const nChars: string[] = [];
+        for (let i = 0; i < needle.length; i++) {
+            if (!/\s/.test(needle[i])) {
+                nChars.push(needle[i] === '"' ? "'" : needle[i]);
+            }
         }
-        return charIdx;
+
+        if (nChars.length === 0) return null;
+
+        for (let i = 0; i <= hChars.length - nChars.length; i++) {
+            let match = true;
+            for (let j = 0; j < nChars.length; j++) {
+                if (hChars[i + j].char !== nChars[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                let startIndex = hChars[i].index;
+                let endIndex = hChars[i + nChars.length - 1].index;
+
+                const leadingWsMatch = needle.match(/^(\s+)/);
+                if (leadingWsMatch) {
+                    let hWsStart = startIndex;
+                    while (hWsStart > 0 && /\s/.test(haystack[hWsStart - 1])) {
+                        if (haystack[hWsStart - 1] === '\n' && !leadingWsMatch[1].includes('\n')) break;
+                        hWsStart--;
+                    }
+                    startIndex = hWsStart;
+                }
+
+                const trailingWsMatch = needle.match(/(\s+)$/);
+                if (trailingWsMatch) {
+                    let hWsEnd = endIndex;
+                    while (hWsEnd < haystack.length - 1 && /\s/.test(haystack[hWsEnd + 1])) {
+                        if (haystack[hWsEnd + 1] === '\n' && !trailingWsMatch[1].includes('\n')) break;
+                        hWsEnd++;
+                    }
+                    endIndex = hWsEnd;
+                }
+
+                return {
+                    index: startIndex,
+                    text: haystack.substring(startIndex, endIndex + 1)
+                };
+            }
+        }
+
+        return null;
     }
+    // Removing the rest of the old fuzzyFindIndex
 
     public async handleRevertEdit(filePath: string, oldText: string, newText: string) {
         this.provider.addMessage('user', `Reverting changes in ${filePath}...`);

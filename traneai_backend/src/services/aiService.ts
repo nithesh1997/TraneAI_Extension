@@ -35,6 +35,11 @@ ${contextSnippets || ''}
 - NO filler like "I hope this helps" or "Let me know if I can help further".
 - NO emojis.
 
+## Thinking Process
+When working on complex tasks, wrap your reasoning in <think>...</think> tags BEFORE providing your answer.
+This helps you plan and reason through the problem. The user will see a collapsed "Thinking..." section.
+For simple greetings or trivial responses, do NOT use think tags.
+
 ## CRITICAL: Accurate Edit Placement (Requirement 4)
 When editing a TypeScript/JavaScript/React file, you MUST follow these placement rules:
 1. IMPORT statements: Place at the TOP of the file, after existing imports
@@ -106,16 +111,162 @@ When renaming a symbol (function, class, component, import, variable):
 - Workspace root: ${wsRoot || 'Not available'}
 - You have full read/write access to the entire workspace`;
 
-export async function generateAIResponse(
+// ──────────────────────────────────────────────────────────────────────────────
+// Tool execution helper
+// ──────────────────────────────────────────────────────────────────────────────
+async function executeTool(
+  functionName: string,
+  functionArgs: any,
+  workspaceRoot?: string
+): Promise<string> {
+  if (functionName === 'list_files') {
+    return await listFiles(workspaceRoot, functionArgs.directory);
+  } else if (functionName === 'read_file') {
+    return await readFile(functionArgs.filePath, workspaceRoot);
+  } else if (functionName === 'create_file') {
+    return await createFile(functionArgs.filePath, functionArgs.content, workspaceRoot);
+  } else if (functionName === 'write_file') {
+    return await writeFile(functionArgs.filePath, functionArgs.content, workspaceRoot);
+  } else if (functionName === 'edit_file') {
+    return await editFile(functionArgs.filePath, functionArgs.oldString, functionArgs.newString, workspaceRoot);
+  } else if (functionName === 'multi_file_edit') {
+    return await multiFileEdit(functionArgs.changes, workspaceRoot);
+  } else if (functionName === 'analyze_code') {
+    return await analyzeCode(functionArgs.filePath, workspaceRoot);
+  } else if (functionName === 'run_command') {
+    return await runCommand(functionArgs.command, workspaceRoot);
+  } else if (functionName === 'fuzzy_find_file') {
+    return await fuzzyFindFile(functionArgs.query, workspaceRoot, functionArgs.max_results);
+  } else if (functionName === 'search_symbol') {
+    return await searchBySymbol(functionArgs.query, workspaceRoot);
+  } else if (functionName === 'find_references') {
+    return await findReferences(functionArgs.symbolName, workspaceRoot);
+  } else if (functionName === 'investigate_error') {
+    const investigator = workspaceRoot ? errorInvestigators.get(workspaceRoot) : undefined;
+    if (investigator) {
+      const analysis = investigator.analyzeError(functionArgs.errorMessage);
+      return '## Error Investigation\n\n**Error:** ' + analysis.errorMessage + '\n**Root Cause:** ' + analysis.rootCause + '\n**Source File:** ' + analysis.sourceFile + ':' + analysis.sourceLine + '\n**Affected Files:** ' + analysis.impactedFiles.join(', ') + '\n\n**Fix Proposal:**\n' + analysis.fixProposal;
+    }
+    return 'Error investigator not initialized. Workspace root required.';
+  } else if (functionName === 'get_architecture') {
+    const analyzer = workspaceRoot ? architectureAnalyzers.get(workspaceRoot) : undefined;
+    if (analyzer) {
+      const detail = functionArgs.detail || 'overview';
+      return detail === 'components' ? analyzer.getComponentMap() : analyzer.getArchitectureOverview();
+    }
+    return 'Architecture analyzer not initialized.';
+  } else if (functionName === 'analyze_impact') {
+    const analyzer = workspaceRoot ? impactAnalyzers.get(workspaceRoot) : undefined;
+    if (analyzer) {
+      const impact = analyzer.analyzeImpact(functionArgs.filePath, functionArgs.symbolName || 'changes');
+      return '## Impact Analysis\n\n**File:** ' + impact.primaryFile + '\n**Risk Level:** ' + impact.riskLevel + '\n**Affected Files (' + impact.affectedFiles.length + '):**\n' + impact.affectedFiles.map((f: any) => '- `' + f.filePath + '` (' + f.impactType + ') -- ' + f.summary).join('\n') + '\n\n**Recommendation:** ' + impact.recommendation;
+    }
+    return 'Impact analyzer not initialized.';
+  } else if (functionName === 'explain_code_deeply') {
+    const codeAnalysis = await analyzeCode(functionArgs.filePath, workspaceRoot);
+    return '## Deep Code Explanation\n\n' + codeAnalysis;
+  }
+  return 'Unknown tool: ' + functionName;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Stream a single OpenAI call, emitting tokens and collecting tool calls
+// ──────────────────────────────────────────────────────────────────────────────
+interface StreamResult {
+  content: string;
+  toolCalls: { id: string; name: string; arguments: string }[];
+}
+
+async function streamCompletion(
+  client: AzureOpenAI,
+  messages: any[],
+  tools: any[],
+  toolChoice: any,
+  onToken: (token: string) => void
+): Promise<StreamResult> {
+  let content = '';
+  const toolCallBuffers: Map<number, { id: string; name: string; args: string }> = new Map();
+
+  try {
+    const stream = await client.chat.completions.create({
+      model: process.env.AZURE_OPENAI_DEPLOYMENT!,
+      messages,
+      tools,
+      tool_choice: toolChoice,
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+      if (!delta) continue;
+
+      // Stream content tokens immediately
+      if (delta.content) {
+        content += delta.content;
+        onToken(delta.content);
+      }
+
+      // Buffer tool call arguments as they arrive in chunks
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index;
+          if (!toolCallBuffers.has(idx)) {
+            toolCallBuffers.set(idx, { id: tc.id || '', name: tc.function?.name || '', args: '' });
+          }
+          const buf = toolCallBuffers.get(idx)!;
+          if (tc.id) buf.id = tc.id;
+          if (tc.function?.name) buf.name = tc.function.name;
+          if (tc.function?.arguments) buf.args += tc.function.arguments;
+        }
+      }
+    }
+  } catch (err: any) {
+    // If streaming fails (e.g. model doesn't support it), fall back to non-streaming
+    console.warn('[aiService] Streaming failed, falling back to non-streaming:', err.message);
+    const response = await client.chat.completions.create({
+      model: process.env.AZURE_OPENAI_DEPLOYMENT!,
+      messages,
+      tools,
+      tool_choice: toolChoice,
+    });
+    const msg = response.choices[0].message;
+    if (msg.content) {
+      content = msg.content;
+      onToken(content);
+    }
+    if (msg.tool_calls) {
+      for (let i = 0; i < msg.tool_calls.length; i++) {
+        const tc = msg.tool_calls[i];
+        toolCallBuffers.set(i, {
+          id: tc.id,
+          name: tc.function.name,
+          args: tc.function.arguments,
+        });
+      }
+    }
+  }
+
+  const toolCalls = Array.from(toolCallBuffers.values())
+    .filter(tc => tc.id && tc.name)
+    .map(tc => ({ id: tc.id, name: tc.name, arguments: tc.args }));
+
+  return { content, toolCalls };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Main streaming AI response generator
+// ──────────────────────────────────────────────────────────────────────────────
+export async function generateAIResponseStreaming(
   message: string,
-  history?: { role: 'user' | 'assistant'; content: string }[],
-  context?: any,
-  workspaceRoot?: string,
-  model?: string,
-  onStep?: (step: string) => void,
+  history: { role: 'user' | 'assistant'; content: string }[] | undefined,
+  context: any,
+  workspaceRoot: string | undefined,
+  model: string | undefined,
+  onToken: (token: string) => void,
+  onStep: (step: string) => void,
   pinnedFiles: string[] = [],
   images?: { base64: string; mimeType: string }[]
-): Promise<string> {
+): Promise<void> {
   const client = new AzureOpenAI({
     apiKey: process.env.AZURE_OPENAI_API_KEY,
     endpoint: process.env.AZURE_OPENAI_ENDPOINT,
@@ -124,8 +275,6 @@ export async function generateAIResponse(
   });
 
   const tools = AI_TOOLS;
-
-  const commandBlocks: { cmd: string; status: string; output: string }[] = [];
 
   let indexSummary = '';
   let pinnedContext = '';
@@ -178,7 +327,7 @@ export async function generateAIResponse(
   }
 
   const intent = await classifier.classify(message);
-  
+
   // High-reliability mode: Force tool use for coding tasks to ensure HITL approval
   const forceTool = intent === Intent.EDIT_FILE || intent === Intent.MULTI_FILE_EDIT || intent === Intent.REFACTOR || intent === Intent.FIX_ERROR;
 
@@ -203,179 +352,171 @@ export async function generateAIResponse(
 
   let toolChoice: any = 'auto';
   if (forceTool) {
-    // Force the model to use a tool to ensure HITL approval triggers
     toolChoice = 'required';
   }
 
-  let response;
-  try {
-    response = await client.chat.completions.create({
-      model: process.env.AZURE_OPENAI_DEPLOYMENT!,
-      messages: messages,
-      tools: tools,
-      tool_choice: toolChoice,
-    });
-  } catch (err) {
-    console.warn('[aiService] tool_choice: "required" failed or not supported, falling back to "auto"', err);
-    response = await client.chat.completions.create({
-      model: process.env.AZURE_OPENAI_DEPLOYMENT!,
-      messages: messages,
-      tools: tools,
-      tool_choice: 'auto',
-    });
-  }
-
-  let responseMessage = response.choices[0].message;
   let allProposals: string[] = [];
+  const MAX_TOOL_ROUNDS = 15;
+  let round = 0;
 
-  const steps: string[] = [];
+  // ── Streaming tool loop ──────────────────────────────────────────────────
+  while (round < MAX_TOOL_ROUNDS) {
+    round++;
 
-  while (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
-    messages.push(responseMessage);
+    let result: StreamResult;
+    try {
+      result = await streamCompletion(client, messages, tools, toolChoice, onToken);
+    } catch (err) {
+      console.warn('[aiService] stream call failed, falling back to auto:', err);
+      toolChoice = 'auto';
+      result = await streamCompletion(client, messages, tools, toolChoice, onToken);
+    }
 
-    for (const toolCall of responseMessage.tool_calls) {
-      if (toolCall.type !== 'function') continue;
-      
-      const functionName = toolCall.function.name;
+    // If no tool calls, we're done
+    if (result.toolCalls.length === 0) {
+      break;
+    }
+
+    // Build the assistant message with tool calls for the conversation
+    const assistantMsg: any = { role: 'assistant', content: result.content || null };
+    assistantMsg.tool_calls = result.toolCalls.map(tc => ({
+      id: tc.id,
+      type: 'function',
+      function: { name: tc.name, arguments: tc.arguments },
+    }));
+    messages.push(assistantMsg);
+
+    // Execute each tool call and stream steps
+    for (const tc of result.toolCalls) {
       let functionArgs: any = {};
       try {
-        functionArgs = JSON.parse(toolCall.function.arguments);
+        functionArgs = JSON.parse(tc.arguments);
       } catch {
-        console.warn('[aiService] Failed to parse tool arguments for', functionName, toolCall.function.arguments);
+        console.warn('[aiService] Failed to parse tool arguments for', tc.name, tc.arguments);
+        messages.push({ tool_call_id: tc.id, role: 'tool', name: tc.name, content: 'ERROR: Failed to parse arguments.' });
         continue;
       }
-      let functionResponse = '';
 
-      // Add to steps log
+      // Emit step events
       let stepStr = '';
-      if (functionName === 'read_file') {
+      if (tc.name === 'read_file') {
         stepStr = `[STEP] Read File | ${functionArgs.filePath} [/STEP]`;
-      } else if (functionName === 'list_files') {
+      } else if (tc.name === 'list_files') {
         stepStr = `[STEP] Exploring Directory | ${functionArgs.directory || '/'} [/STEP]`;
-      } else if (functionName === 'analyze_code') {
+      } else if (tc.name === 'analyze_code') {
         stepStr = `[STEP] Analyzing Code | ${functionArgs.filePath} [/STEP]`;
-      } else if (functionName === 'run_command') {
+      } else if (tc.name === 'run_command') {
         stepStr = `[STEP] Running Command | ${functionArgs.command} [/STEP]`;
+      } else if (tc.name === 'edit_file') {
+        stepStr = `[STEP] Editing File | ${functionArgs.filePath} [/STEP]`;
+      } else if (tc.name === 'create_file') {
+        stepStr = `[STEP] Creating File | ${functionArgs.filePath} [/STEP]`;
+      } else if (tc.name === 'multi_file_edit') {
+        stepStr = `[STEP] Multi-File Edit | ${(functionArgs.changes || []).length} files [/STEP]`;
+      } else if (tc.name === 'fuzzy_find_file') {
+        stepStr = `[STEP] Searching Files | ${functionArgs.query} [/STEP]`;
+      } else if (tc.name === 'search_symbol') {
+        stepStr = `[STEP] Searching Symbol | ${functionArgs.query} [/STEP]`;
+      } else if (tc.name === 'find_references') {
+        stepStr = `[STEP] Finding References | ${functionArgs.symbolName} [/STEP]`;
       }
 
       if (stepStr) {
-        steps.push(stepStr);
-        if (onStep) onStep(stepStr);
+        onStep(stepStr);
       }
 
-      if (functionName === 'list_files') {
-        functionResponse = await listFiles(workspaceRoot, functionArgs.directory);
-      } else if (functionName === 'read_file') {
-        functionResponse = await readFile(functionArgs.filePath, workspaceRoot);
-      } else if (functionName === 'create_file') {
-        functionResponse = await createFile(functionArgs.filePath, functionArgs.content, workspaceRoot);
-      } else if (functionName === 'write_file') {
-        functionResponse = await writeFile(functionArgs.filePath, functionArgs.content, workspaceRoot);
-      } else if (functionName === 'edit_file') {
-        functionResponse = await editFile(functionArgs.filePath, functionArgs.oldString, functionArgs.newString, workspaceRoot);
-      } else if (functionName === 'multi_file_edit') {
-        functionResponse = await multiFileEdit(functionArgs.changes, workspaceRoot);
-      } else if (functionName === 'analyze_code') {
-        functionResponse = await analyzeCode(functionArgs.filePath, workspaceRoot);
-      } else if (functionName === 'run_command') {
-        const proposal = await runCommand(functionArgs.command, workspaceRoot);
-        functionResponse = proposal;
-      } else if (functionName === 'fuzzy_find_file') {
-        functionResponse = await fuzzyFindFile(functionArgs.query, workspaceRoot, functionArgs.max_results);
-      } else if (functionName === 'search_symbol') {
-        functionResponse = await searchBySymbol(functionArgs.query, workspaceRoot);
-      } else if (functionName === 'find_references') {
-        functionResponse = await findReferences(functionArgs.symbolName, workspaceRoot);
-      } else if (functionName === 'investigate_error') {
-        const investigator = workspaceRoot ? errorInvestigators.get(workspaceRoot) : undefined;
-        if (investigator) {
-          const analysis = investigator.analyzeError(functionArgs.errorMessage);
-          functionResponse = '## Error Investigation\n\n**Error:** ' + analysis.errorMessage + '\n**Root Cause:** ' + analysis.rootCause + '\n**Source File:** ' + analysis.sourceFile + ':' + analysis.sourceLine + '\n**Affected Files:** ' + analysis.impactedFiles.join(', ') + '\n\n**Fix Proposal:**\n' + analysis.fixProposal;
-        } else {
-          functionResponse = 'Error investigator not initialized. Workspace root required.';
-        }
-      } else if (functionName === 'get_architecture') {
-        const analyzer = workspaceRoot ? architectureAnalyzers.get(workspaceRoot) : undefined;
-        if (analyzer) {
-          const detail = functionArgs.detail || 'overview';
-          functionResponse = detail === 'components' ? analyzer.getComponentMap() : analyzer.getArchitectureOverview();
-        } else {
-          functionResponse = 'Architecture analyzer not initialized.';
-        }
-      } else if (functionName === 'analyze_impact') {
-        const analyzer = workspaceRoot ? impactAnalyzers.get(workspaceRoot) : undefined;
-        if (analyzer) {
-          const impact = analyzer.analyzeImpact(functionArgs.filePath, functionArgs.symbolName || 'changes');
-          functionResponse = '## Impact Analysis\n\n**File:** ' + impact.primaryFile + '\n**Risk Level:** ' + impact.riskLevel + '\n**Affected Files (' + impact.affectedFiles.length + '):**\n' + impact.affectedFiles.map(f => '- `' + f.filePath + '` (' + f.impactType + ') -- ' + f.summary).join('\n') + '\n\n**Recommendation:** ' + impact.recommendation;
-        } else {
-          functionResponse = 'Impact analyzer not initialized.';
-        }
-      } else if (functionName === 'explain_code_deeply') {
-        const codeAnalysis = await analyzeCode(functionArgs.filePath, workspaceRoot);
-        functionResponse = '## Deep Code Explanation\n\n' + codeAnalysis;
-      }
+      const functionResponse = await executeTool(tc.name, functionArgs, workspaceRoot);
 
-      if (functionName === 'edit_file' || functionName === 'multi_file_edit' || functionName === 'run_command') {
+      if (tc.name === 'edit_file' || tc.name === 'multi_file_edit' || tc.name === 'run_command' || tc.name === 'create_file') {
         allProposals.push(functionResponse);
       }
 
       messages.push({
-        tool_call_id: toolCall.id,
+        tool_call_id: tc.id,
         role: 'tool',
-        name: functionName,
+        name: tc.name,
         content: functionResponse,
       });
     }
 
-    const nextResponse = await client.chat.completions.create({
-      model: process.env.AZURE_OPENAI_DEPLOYMENT!,
-      messages: messages,
-      tools: tools,
-    });
-    responseMessage = nextResponse.choices[0].message;
-
-    // Safety Intervention: If forcing tools and the AI tried to "chat" its way out without an edit yet
-    if (forceTool && allProposals.length === 0 && !responseMessage.tool_calls) {
-       messages.push({ role: 'user', content: 'You have analyzed the context but haven\'t proposed an edit yet. Please use the edit_file tool to implement the requested changes now.' });
-       const retryResponse = await client.chat.completions.create({
-         model: process.env.AZURE_OPENAI_DEPLOYMENT!,
-         messages: messages,
-         tools: tools,
-         tool_choice: 'required'
-       });
-       if (retryResponse.choices[0].message.tool_calls) {
-         responseMessage = retryResponse.choices[0].message;
-       }
-    }
+    // After first round of tool execution, switch to auto for subsequent calls
+    toolChoice = 'auto';
   }
 
-  let finalContent = responseMessage.content || '';
+  // Safety Intervention: If forcing tools and no edit was proposed yet, nudge the AI
+  if (forceTool && allProposals.length === 0) {
+    messages.push({ role: 'user', content: 'You have analyzed the context but haven\'t proposed an edit yet. Please use the edit_file tool to implement the requested changes now.' });
+    const retryResult = await streamCompletion(client, messages, tools, 'required', onToken);
 
-  // Safety layer: ONLY append proposals if they are absolutely missing from the final message.
-  // This prevents duplication if the AI already included them.
-  if (allProposals.length > 0) {
-    let proposalBlock = '';
-    for (const proposal of allProposals) {
-      // Check if this specific proposal is already in the final content in its completeness
-      if (!finalContent.includes(proposal)) {
-         proposalBlock += `\n\n${proposal}`;
+    if (retryResult.toolCalls.length > 0) {
+      const assistantMsg: any = { role: 'assistant', content: retryResult.content || null };
+      assistantMsg.tool_calls = retryResult.toolCalls.map(tc => ({
+        id: tc.id,
+        type: 'function',
+        function: { name: tc.name, arguments: tc.arguments },
+      }));
+      messages.push(assistantMsg);
+
+      for (const tc of retryResult.toolCalls) {
+        let functionArgs: any = {};
+        try {
+          functionArgs = JSON.parse(tc.arguments);
+        } catch { continue; }
+
+        const functionResponse = await executeTool(tc.name, functionArgs, workspaceRoot);
+        allProposals.push(functionResponse);
+
+        messages.push({
+          tool_call_id: tc.id,
+          role: 'tool',
+          name: tc.name,
+          content: functionResponse,
+        });
       }
+
+      // Get final response after retry
+      await streamCompletion(client, messages, tools, 'auto', onToken);
     }
-    finalContent += proposalBlock;
-  }
-  
-  // Prepend steps to the content
-  if (steps.length > 0) {
-    finalContent = steps.join('\n') + '\n\n' + finalContent;
   }
 
-  if (commandBlocks.length === 0) {
-    return finalContent;
+  // Stream any proposals that weren't already streamed as part of the AI's response
+  for (const proposal of allProposals) {
+    onToken('\n\n' + proposal);
   }
-  const blockMarkers = commandBlocks
-    .map(b => `\`\`\`cmd-result\n${JSON.stringify(b)}\n\`\`\``)
-    .join('\n');
-return `${blockMarkers}\n\n${finalContent}`;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Legacy non-streaming wrapper (kept for backward compatibility)
+// ──────────────────────────────────────────────────────────────────────────────
+export async function generateAIResponse(
+  message: string,
+  history?: { role: 'user' | 'assistant'; content: string }[],
+  context?: any,
+  workspaceRoot?: string,
+  model?: string,
+  onStep?: (step: string) => void,
+  pinnedFiles: string[] = [],
+  images?: { base64: string; mimeType: string }[]
+): Promise<string> {
+  let fullContent = '';
+  const steps: string[] = [];
 
+  await generateAIResponseStreaming(
+    message,
+    history,
+    context,
+    workspaceRoot,
+    model,
+    (token) => { fullContent += token; },
+    (step) => { steps.push(step); if (onStep) onStep(step); },
+    pinnedFiles,
+    images
+  );
+
+  // Prepend steps to the content
+  if (steps.length > 0) {
+    fullContent = steps.join('\n') + '\n\n' + fullContent;
+  }
+
+  return fullContent;
+}

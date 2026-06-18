@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import { ChatRequest, QuickActionRequest } from '../types/index.js';
-import { generateAIResponse } from '../services/aiService.js';
+import { generateAIResponse, generateAIResponseStreaming } from '../services/aiService.js';
 import { generateDeepExplanation, formatDeepExplanation, generateExplanation, generateReview, generateTests } from '../services/codeAnalysisService.js';
 
 export async function handleChatMessage(req: Request, res: Response): Promise<void> {
@@ -37,14 +37,44 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
 
-      const onStep = (step: string) => {
-        res.write(`data: ${JSON.stringify({ type: 'step', content: step })}\n\n`);
+      let fullContent = '';
+
+      const onToken = (token: string) => {
+        fullContent += token;
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`);
+        } catch {}
       };
 
-      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, onStep, pinnedFilesArray, images);
-      res.write(`data: ${JSON.stringify({ type: 'final', content: reply })}\n\n`);
+      const onStep = (step: string) => {
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'step', content: step })}\n\n`);
+        } catch {}
+      };
+
+      try {
+        await generateAIResponseStreaming(
+          message,
+          history,
+          context,
+          workspaceRoot,
+          model,
+          onToken,
+          onStep,
+          pinnedFilesArray,
+          images
+        );
+
+        // Send final signal so the frontend knows streaming is complete
+        res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      } catch (streamError: any) {
+        console.error('Streaming error:', streamError);
+        res.write(`data: ${JSON.stringify({ type: 'error', content: streamError.message || 'Stream failed' })}\n\n`);
+      }
+
       res.end();
     } else {
       const reply = await generateAIResponse(message, history, context, workspaceRoot, model, undefined, pinnedFilesArray, images);

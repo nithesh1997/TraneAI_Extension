@@ -9,75 +9,77 @@ function normalizeQuotes(s: string): string {
   return s.replace(/["']/g, "'");
 }
 
-function fuzzyIndexOf(haystack: string, needle: string): number {
-  const idx = haystack.indexOf(needle);
-  if (idx !== -1) return idx;
-  const normalizedNeedle = normalizeQuotes(needle);
-  const normalizedHaystack = normalizeQuotes(haystack);
-  const idx2 = normalizedHaystack.indexOf(normalizedNeedle);
-  if (idx2 !== -1) return idx2;
-  return fuzzyLineMatch(haystack, needle);
-}
+function fuzzyFindMatch(haystack: string, needle: string): { index: number, text: string } | null {
+  const exactIdx = haystack.indexOf(needle);
+  if (exactIdx !== -1) return { index: exactIdx, text: needle };
 
-function fuzzyLineMatch(haystack: string, needle: string): number {
-  const hLines = haystack.split('\n');
-  const nLines = needle.split('\n');
-  if (nLines.length === 0) return -1;
+  const nNeedle = needle.replace(/["']/g, "'");
+  const nHaystack = haystack.replace(/["']/g, "'");
+  const qIdx = nHaystack.indexOf(nNeedle);
+  if (qIdx !== -1) return { index: qIdx, text: haystack.substring(qIdx, qIdx + needle.length) };
 
-  const normalize = (l: string) => l.trimEnd().replace(/[ \t]+/g, ' ').replace(/["']/g, "'").replace(/;$/,'');
-  const normHLines = hLines.map(normalize);
-  const normNLines = nLines.map(normalize);
-  const firstLine = normNLines[0];
-  if (!firstLine) return -1;
-
-  // Try exact normalized first-line match
-  const firstMatch = normHLines.indexOf(firstLine);
-  if (firstMatch !== -1 && nLines.length === 1) {
-    return charOffsetForLine(haystack, firstMatch);
-  }
-
-  // Try multi-line best-score match
-  let bestScore = -1;
-  let bestStart = -1;
-  for (let i = 0; i < normHLines.length; i++) {
-    if (normHLines[i] === firstLine) {
-      let score = 0;
-      for (let j = 0; j < normNLines.length && i + j < normHLines.length; j++) {
-        if (normHLines[i + j] === normNLines[j]) score++;
-        else if (normHLines[i + j].includes(normNLines[j]) || normNLines[j].includes(normHLines[i + j])) score += 0.5;
-      }
-      if (score > bestScore) { bestScore = score; bestStart = i; }
+  interface Char { char: string; index: number; }
+  const hChars: Char[] = [];
+  for (let i = 0; i < haystack.length; i++) {
+    if (!/\s/.test(haystack[i])) {
+      hChars.push({ char: haystack[i] === '"' ? "'" : haystack[i], index: i });
     }
   }
 
-  // If no line match found, try partial content match within each line
-  if (bestStart === -1) {
-    const needleContent = needle.trim();
-    for (let i = 0; i < hLines.length; i++) {
-      if (hLines[i].includes(needleContent) || needleContent.includes(hLines[i].trim())) {
-        bestStart = i;
-        bestScore = 1;
+  const nChars: string[] = [];
+  for (let i = 0; i < needle.length; i++) {
+    if (!/\s/.test(needle[i])) {
+      nChars.push(needle[i] === '"' ? "'" : needle[i]);
+    }
+  }
+
+  if (nChars.length === 0) return null;
+
+  for (let i = 0; i <= hChars.length - nChars.length; i++) {
+    let match = true;
+    for (let j = 0; j < nChars.length; j++) {
+      if (hChars[i + j].char !== nChars[j]) {
+        match = false;
         break;
       }
     }
+    if (match) {
+      let startIndex = hChars[i].index;
+      let endIndex = hChars[i + nChars.length - 1].index;
+
+      const leadingWsMatch = needle.match(/^(\s+)/);
+      if (leadingWsMatch) {
+        let hWsStart = startIndex;
+        while (hWsStart > 0 && /\s/.test(haystack[hWsStart - 1])) {
+          if (haystack[hWsStart - 1] === '\n' && !leadingWsMatch[1].includes('\n')) break;
+          hWsStart--;
+        }
+        startIndex = hWsStart;
+      }
+
+      const trailingWsMatch = needle.match(/(\s+)$/);
+      if (trailingWsMatch) {
+        let hWsEnd = endIndex;
+        while (hWsEnd < haystack.length - 1 && /\s/.test(haystack[hWsEnd + 1])) {
+          if (haystack[hWsEnd + 1] === '\n' && !trailingWsMatch[1].includes('\n')) break;
+          hWsEnd++;
+        }
+        endIndex = hWsEnd;
+      }
+
+      return {
+        index: startIndex,
+        text: haystack.substring(startIndex, endIndex + 1)
+      };
+    }
   }
 
-  if (bestStart === -1 || bestScore < Math.max(1, nLines.length * 0.3)) return -1;
-  return charOffsetForLine(haystack, bestStart);
-}
-
-function charOffsetForLine(haystack: string, lineIndex: number): number {
-  let charIdx = 0;
-  for (let i = 0; i < lineIndex; i++) {
-    const nextIdx = haystack.indexOf('\n', charIdx);
-    if (nextIdx === -1) return -1;
-    charIdx = nextIdx + 1;
-  }
-  return charIdx;
+  return null;
 }
 
 export function findMatch(content: string, oldString: string): number {
-  return fuzzyIndexOf(content, oldString);
+  const match = fuzzyFindMatch(content, oldString);
+  return match ? match.index : -1;
 }
 
 export async function listFiles(workspaceRoot?: string, directory: string = '.'): Promise<string> {
@@ -112,14 +114,9 @@ export async function createFile(filePath: string, content: string, workspaceRoo
   if (!workspaceRoot) return 'Workspace root not found.';
   if (!content || typeof content !== 'string') return 'ERROR: content is empty or missing. You must provide file content.';
   const fullPath = path.join(workspaceRoot, filePath);
-  const dir = path.dirname(fullPath);
-  try {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(fullPath, content, 'utf-8');
-    return 'SUCCESS: Created new file `' + filePath + '` (' + content.split('\n').length + ' lines).';
-  } catch (err: any) {
-    return 'ERROR: Failed to create file ' + filePath + ': ' + err.message;
-  }
+  if (fs.existsSync(fullPath)) return 'ERROR: File already exists: ' + filePath + '. Use edit_file or write_file instead.';
+  
+  return '[EDIT_PROPOSAL]\nfile: ' + filePath + '\nold: |\n\nnew: |\n' + content + '\nstatus: ready\nmessage: Proposal to create new file\n[END_EDIT]';
 }
 
 export async function writeFile(filePath: string, content: string, workspaceRoot?: string): Promise<string> {
@@ -127,12 +124,15 @@ export async function writeFile(filePath: string, content: string, workspaceRoot
   if (!content || typeof content !== 'string') return 'ERROR: content is empty or missing.';
   const fullPath = path.join(workspaceRoot, filePath);
   if (!fs.existsSync(fullPath)) return 'File not found: ' + filePath + '. Use create_file to create a new file.';
+  
+  let oldContent = '';
   try {
-    fs.writeFileSync(fullPath, content, 'utf-8');
-    return 'SUCCESS: Overwrote file `' + filePath + '` (' + content.split('\n').length + ' lines).';
-  } catch (err: any) {
-    return 'ERROR: Failed to write file ' + filePath + ': ' + err.message;
+    oldContent = fs.readFileSync(fullPath, 'utf-8');
+  } catch (e) {
+    return 'ERROR: Could not read existing file to generate proposal.';
   }
+
+  return '[EDIT_PROPOSAL]\nfile: ' + filePath + '\nold: |\n' + oldContent + '\nnew: |\n' + content + '\nstatus: ready\nmessage: Proposal to overwrite file\n[END_EDIT]';
 }
 
 export async function editFile(filePath: string, oldString: string, newString: string, workspaceRoot?: string): Promise<string> {
@@ -143,8 +143,8 @@ export async function editFile(filePath: string, oldString: string, newString: s
   if (!fs.existsSync(fullPath)) return 'File not found: ' + filePath;
   try {
     const content = fs.readFileSync(fullPath, 'utf-8');
-    const matchIdx = fuzzyIndexOf(content, oldString);
-    if (matchIdx === -1) {
+    const match = fuzzyFindMatch(content, oldString);
+    if (!match) {
       return 'ERROR: The text to replace was not found in ' + filePath + '.\n\n' +
         'This usually means the oldString has incorrect whitespace, indentation, or content.\n\n' +
         'To fix this:\n' +
@@ -157,7 +157,7 @@ export async function editFile(filePath: string, oldString: string, newString: s
         '- You are trying to insert code but did not include enough surrounding context\n' +
         '- The surrounding code you referenced does not exist in the file (wrong file?)';
     }
-    const matchedText = content.substring(matchIdx, matchIdx + oldString.length);
+    const matchedText = match.text;
     return '[EDIT_PROPOSAL]\nfile: ' + filePath + '\nold: |\n' + matchedText + '\nnew: |\n' + newString + '\nstatus: ready\nmessage: Targeted edit proposal\n[END_EDIT]';
   } catch (err: any) {
     return 'Error editing file: ' + err.message;
