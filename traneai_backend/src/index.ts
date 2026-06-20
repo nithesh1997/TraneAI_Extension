@@ -7,15 +7,21 @@ import helmet from 'helmet';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import cookieParser from 'cookie-parser';
+import { randomBytes } from 'crypto';
 import chatRoutes from './routes/chat.js';
 import workspaceRoutes from './routes/workspace.js';
 import { swaggerOptions } from './swagger.js';
+import { initializeLiveShareWebSocket } from './services/liveScreenShareService.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const swaggerDocs = swaggerJsdoc(swaggerOptions);
 
 app.use(helmet());
+app.use((req, res, next) => {
+  res.locals.cspNonce = randomBytes(16).toString('base64');
+  next();
+});
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
   methods: ['GET', 'POST'],
@@ -37,7 +43,9 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`TraneAI Backend running on port ${PORT}`);
   console.log(`Swagger docs available at http://localhost:${PORT}/api-docs`);
 });
+
+initializeLiveShareWebSocket(server);

@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { handleChatMessage, handleQuickAction } from '../controllers/chatController.js';
 import { takeScreenshot } from '../controllers/screenshotController.js';
+import { createLiveSession, serveLiveShareClient } from '../controllers/liveController.js';
 
 const router = express.Router();
 
@@ -69,6 +70,9 @@ router.post('/message', upload.array('images'), handleChatMessage);
  *               $ref: '#/components/schemas/QuickActionResponse'
  */
 router.post('/quick-action', handleQuickAction);
+
+router.post('/live/session', createLiveSession);
+router.get('/live/client', serveLiveShareClient);
 
 /**
  * @swagger

@@ -214,6 +214,9 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                 });
             }
             break;
+        case 'openExternalScreenShare':
+            vscode.env.openExternal(vscode.Uri.parse('http://localhost:5000/api/chat/live/client'));
+            break;
         case 'clearLogs':
             ConsoleService.getInstance().clearLogs();
             break;

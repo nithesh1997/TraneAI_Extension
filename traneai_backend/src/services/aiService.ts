@@ -237,10 +237,15 @@ async function streamCompletion(
     if (msg.tool_calls) {
       for (let i = 0; i < msg.tool_calls.length; i++) {
         const tc = msg.tool_calls[i];
+        const fnCall = 'function' in tc ? tc.function : undefined;
+        if (!fnCall?.name) {
+          continue;
+        }
+
         toolCallBuffers.set(i, {
           id: tc.id,
-          name: tc.function.name,
-          args: tc.function.arguments,
+          name: fnCall.name,
+          args: fnCall.arguments || '',
         });
       }
     }
