@@ -132,6 +132,41 @@
   }
 }
 
+.login-or-divider {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: 280px;
+  margin: 16px 0;
+}
+
+.login-or-divider::before,
+.login-or-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border);
+}
+
+.login-or-divider span {
+  padding: 0 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.face-login-btn {
+  &.ant-btn {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+
+    .anticon {
+      font-size: 15px;
+    }
+  }
+}
+
 .login-nav {
   font-size: 11px;
   color: var(--text-muted);

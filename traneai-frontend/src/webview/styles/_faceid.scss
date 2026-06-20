@@ -1,0 +1,209 @@
+.face-scan-card {
+  width: min(100%, 360px);
+  background: rgba(11, 15, 20, 0.96);
+  border: 1px solid rgba(88, 166, 255, 0.18);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+  border-radius: 24px;
+  padding: 24px 22px;
+}
+
+.face-scan-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.face-scan-header {
+  text-align: center;
+}
+
+.face-scan-header .ant-typography {
+  color: var(--text-primary);
+}
+
+.camera-card {
+  width: 100%;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(88, 166, 255, 0.12);
+  background: rgba(10, 14, 20, 0.84);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.camera-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 4.6;
+  min-height: 248px;
+  background: radial-gradient(circle at 50% 30%, rgba(88, 166, 255, 0.08), transparent 42%);
+}
+
+.camera-video,
+.camera-fallback {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #05080c;
+}
+
+.camera-video {
+  filter: contrast(1.08) brightness(0.98);
+  transform: scaleX(-1);
+}
+
+.camera-fallback {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 18px;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(14, 20, 29, 0.96), rgba(8, 11, 15, 0.96));
+}
+
+.camera-fallback-icon {
+  font-size: 34px;
+  margin-bottom: 10px;
+  color: #5eead4;
+}
+
+.camera-fallback-text {
+  color: rgba(226, 237, 243, 0.92);
+  line-height: 1.55;
+}
+
+.face-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.face-ring {
+  position: absolute;
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  border: 1.7px solid rgba(94, 234, 212, 0.75);
+  box-shadow: 0 0 0 1px rgba(94, 234, 212, 0.12), 0 0 40px rgba(94, 234, 212, 0.08);
+  animation: pulse-ring 2.6s ease-in-out infinite;
+}
+
+.face-oval {
+  position: absolute;
+  width: 68%;
+  height: 70%;
+  border-radius: 52%;
+  border: 1px dashed rgba(94, 234, 212, 0.65);
+  box-shadow: inset 0 0 22px rgba(94, 234, 212, 0.14);
+}
+
+.scanner-beam {
+  position: absolute;
+  left: 50%;
+  top: -10%;
+  width: 6px;
+  height: 140%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, transparent 0%, rgba(94, 234, 212, 0.95) 45%, rgba(94, 234, 212, 0.08) 85%, transparent 100%);
+  filter: drop-shadow(0 0 18px rgba(94, 234, 212, 0.45));
+  animation: scan-beam 1.9s ease-in-out infinite;
+}
+
+.camera-error-alert {
+  margin: 14px -22px 0;
+  padding: 16px 22px;
+  border-radius: 16px;
+  background: rgba(248, 81, 73, 0.08);
+  border: 1px solid rgba(248, 81, 73, 0.12);
+  color: var(--danger);
+}
+
+.scan-progress-panel {
+  width: 100%;
+}
+
+.scan-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.scan-info .anticon {
+  color: #5eead4;
+  font-size: 18px;
+}
+
+.scan-status-text {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.scan-helper-text {
+  color: #8fdc8f;
+  font-family: 'Source Code Pro', Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  opacity: 0.92;
+  margin-top: 6px;
+  text-shadow: 0 0 8px rgba(143, 220, 143, 0.18);
+}
+
+.scan-status-only {
+  padding-top: 4px;
+}
+
+.face-scan-actions {
+  width: 100%;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.face-scan-actions .ant-btn {
+  min-width: 130px;
+  border-radius: 12px;
+}
+
+.scan-header-title {
+  margin: 0;
+}
+
+@keyframes scan-beam {
+  0%, 100% {
+    transform: translateX(-50%) translateY(-8%);
+    opacity: 0;
+  }
+  45% {
+    opacity: 0.9;
+  }
+  50% {
+    transform: translateX(-50%) translateY(50%);
+    opacity: 1;
+  }
+  95% {
+    opacity: 0;
+  }
+}
+
+@keyframes pulse-ring {
+  0%, 100% {
+    transform: scale(0.98);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+}
