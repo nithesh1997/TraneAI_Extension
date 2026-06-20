@@ -145,14 +145,13 @@ const GeminiLiveView: React.FC<GeminiLiveViewProps> = ({ onClose }) => {
 							<circle cx="12" cy="13" r="4"></circle>
 						</svg>
 					</button>
-					<button className="control-btn is-active" title="Voice mode" aria-label="Voice mode">
+					<button className="control-btn is-active" title="Screen sharing" aria-label="Screen sharing">
 						<svg className="control-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-							<path d="M12 1v11"></path>
-							<path d="M8 5h8"></path>
-							<path d="M10 19h4"></path>
-							<path d="M6 23h12"></path>
-							<path d="M12 12a6 6 0 0 0 6-6"></path>
-							<path d="M12 12a6 6 0 0 1-6-6"></path>
+							<rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+							<path d="M8 21h8"></path>
+							<path d="M12 17v4"></path>
+							<path d="M12 8v6"></path>
+							<path d="M9.5 10.5 12 8l2.5 2.5"></path>
 						</svg>
 					</button>
 					<button className="control-btn" title="Mute microphone" aria-label="Mute microphone">
