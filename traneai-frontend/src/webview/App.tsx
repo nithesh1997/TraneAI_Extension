@@ -235,11 +235,11 @@ const ChatApp: React.FC = () => {
 			}));
 			
 			const logsContext = checkedLogs.map(l => 
-				`[${l.level}] ${l.message}${l.file ? ` (${l.file}:${l.line})` : ''}`
+				`${l.level}: ${l.message}${l.file ? ` (${l.file}:${l.line})` : ''}`
 			).join('\n');
 			
-			// We still include a summary in message text for the LLM context, but use attachments for UI
-			const textForAI = `${expression}\n\nRelevant logs:\n\`\`\`\n${logsContext}\n\`\`\``;
+			// Use the [CONSOLE LOGS] syntax to let Message.tsx render it beautifully instead of raw markdown
+			const textForAI = `${expression}\n\n[CONSOLE LOGS]\n${logsContext}\n\n`;
 			
 			setIsTyping(true);
 			handleSendMessage(textForAI, currentModel, logAttachments);

@@ -163,6 +163,7 @@ export class ChatActionHandler {
                 let doc: vscode.TextDocument | undefined;
                 let currentContent = '';
                 let isNewFile = false;
+                const consumedRanges: {start: number, end: number}[] = [];
 
                 try {
                     doc = await vscode.workspace.openTextDocument(uri);
@@ -193,7 +194,7 @@ export class ChatActionHandler {
                         }
 
                         // Use robust matching to find the old text location
-                        const match = this.fuzzyFindMatch(currentContent, prop.oldContent);
+                        const match = this.fuzzyFindMatch(currentContent, prop.oldContent, consumedRanges);
                         if (!match) {
                             resolveErrors.push(`Could not find text in ${prop.filePath}. Try reading the file first.`);
                             allResolved = false;
@@ -204,6 +205,7 @@ export class ChatActionHandler {
                             doc!.positionAt(match.index), 
                             doc!.positionAt(match.index + match.text.length)
                         );
+                        consumedRanges.push({ start: match.index, end: match.index + match.text.length });
                         atomicEdit.replace(uri, range, prop.newContent);
                         documentsToSave.add(uri.toString());
                     }
@@ -248,14 +250,38 @@ export class ChatActionHandler {
     }
 
     /** Fuzzy find needle in haystack (whitespace-agnostic fallback) */
-    private fuzzyFindMatch(haystack: string, needle: string): { index: number, text: string } | null {
-        const exactIdx = haystack.indexOf(needle);
-        if (exactIdx !== -1) return { index: exactIdx, text: needle };
+    private fuzzyFindMatch(haystack: string, needle: string, consumedRanges: {start: number, end: number}[] = []): { index: number, text: string } | null {
+        const isOverlap = (start: number, end: number) => {
+            return consumedRanges.some(r => Math.max(start, r.start) < Math.min(end, r.end));
+        };
+
+        let exactSearchIdx = 0;
+        while (true) {
+            const exactIdx = haystack.indexOf(needle, exactSearchIdx);
+            if (exactIdx !== -1) {
+                if (!isOverlap(exactIdx, exactIdx + needle.length)) {
+                    return { index: exactIdx, text: needle };
+                }
+                exactSearchIdx = exactIdx + 1;
+            } else {
+                break;
+            }
+        }
 
         const nNeedle = needle.replace(/["']/g, "'");
         const nHaystack = haystack.replace(/["']/g, "'");
-        const qIdx = nHaystack.indexOf(nNeedle);
-        if (qIdx !== -1) return { index: qIdx, text: haystack.substring(qIdx, qIdx + needle.length) };
+        let qSearchIdx = 0;
+        while (true) {
+            const qIdx = nHaystack.indexOf(nNeedle, qSearchIdx);
+            if (qIdx !== -1) {
+                if (!isOverlap(qIdx, qIdx + needle.length)) {
+                    return { index: qIdx, text: haystack.substring(qIdx, qIdx + needle.length) };
+                }
+                qSearchIdx = qIdx + 1;
+            } else {
+                break;
+            }
+        }
 
         interface Char { char: string; index: number; }
         const hChars: Char[] = [];
@@ -306,10 +332,12 @@ export class ChatActionHandler {
                     endIndex = hWsEnd;
                 }
 
-                return {
-                    index: startIndex,
-                    text: haystack.substring(startIndex, endIndex + 1)
-                };
+                if (!isOverlap(startIndex, endIndex + 1)) {
+                    return {
+                        index: startIndex,
+                        text: haystack.substring(startIndex, endIndex + 1)
+                    };
+                }
             }
         }
 

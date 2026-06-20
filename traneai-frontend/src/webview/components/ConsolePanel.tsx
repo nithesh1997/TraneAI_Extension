@@ -94,6 +94,8 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
     const [expression, setExpression] = useState('');
     const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
     const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+const [runOutput, setRunOutput] = useState<string>('');
+const [runImage, setRunImage] = useState<string | null>(null);
     const [mounted, setMounted] = useState(false);
 
     // Drag and Resize state
@@ -453,6 +455,32 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
                     </div>
 
                     <div className="console-expression-input console-no-drag">
+                        {(runOutput || runImage) && (
+                            <div className="run-output-preview" style={{
+                                backgroundColor: 'var(--bg-tertiary)',
+                                padding: '12px',
+                                borderRadius: '6px',
+                                marginBottom: '12px',
+                                border: '1px solid var(--border)',
+                                position: 'relative'
+                            }}>
+                                <Button 
+                                    type="text" 
+                                    size="small" 
+                                    icon={<CloseOutlined />} 
+                                    style={{ position: 'absolute', top: '8px', right: '8px', color: 'var(--text-muted)' }}
+                                    onClick={() => { setRunOutput(''); setRunImage(null); }}
+                                />
+                                {runOutput && (
+                                    <div style={{ color: 'var(--text-primary)', marginBottom: runImage ? '8px' : '0', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
+                                        {runOutput}
+                                    </div>
+                                )}
+                                {runImage && (
+                                    <img src={runImage} alt="Run output" style={{ maxWidth: '100%', borderRadius: '4px', display: 'block' }} />
+                                )}
+                            </div>
+                        )}
                         <Space.Compact style={{ width: '100%' }}>
                             <Input
                                 prefix={<span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>&gt;</span>}
