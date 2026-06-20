@@ -30,6 +30,7 @@ interface InputAreaProps {
 	workspaceRoot?: string;
 	onToggleConsole?: () => void;
 	isConsoleVisible?: boolean;
+	onToggleGeminiLive?: () => void;
 }
 
 // Models, skills, and context options imported from InputAreaHelpers.tsx
@@ -56,7 +57,7 @@ const CodePalette: React.FC<{ cb: CodeBlock; onRemove: (id: number) => void }> =
 	);
 };
 
-export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration, workspaceRoot: workspaceRootProp, onToggleConsole, isConsoleVisible }) => {
+export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, onFilesSelected, currentModel, onModelChange, terminalPath, isTyping, onStopGeneration, workspaceRoot: workspaceRootProp, onToggleConsole, isConsoleVisible, onToggleGeminiLive }) => {
 	const [text, setText] = useState(() => {
 		const state = vscode.getState();
 		return state?.inputText || '';
@@ -878,7 +879,9 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 					</div>
 
 					<div className="right-controls">
-						<GeminiLiveIcon />
+						<div onClick={onToggleGeminiLive} style={{ cursor: 'pointer' }}>
+							<GeminiLiveIcon />
+						</div>
 						<button 
 							className={`console-toggle-btn ${isConsoleVisible ? 'active' : ''}`}
 							onClick={onToggleConsole}

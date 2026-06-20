@@ -5,6 +5,7 @@ import { AppHeader } from './components/AppHeader';
 import { HeroSection } from './components/HeroSection';
 import { MessageList } from './components/MessageList';
 import { InputArea } from './components/InputArea';
+import GeminiLiveView from './components/GeminiLiveView';
 import { TypingIndicator } from './components/TypingIndicator';
 import { RedirectScreen } from './components/RedirectScreen';
 import { ChatFooter } from './components/ChatFooter';
@@ -48,6 +49,7 @@ const ChatApp: React.FC = () => {
 	const [consoleLogs, setConsoleLogs] = useState<LogEntry[]>([]);
 	const [consoleVisible, setConsoleVisible] = useState(false);
 	const [consoleFilter, setConsoleFilter] = useState('all');
+	const [isGeminiLiveActive, setIsGeminiLiveActive] = useState(false);
 
 	useEffect(() => {
 		secureRetrieve<StoredTab>(TAB_STORAGE_KEY).then(stored => {
@@ -318,6 +320,7 @@ const ChatApp: React.FC = () => {
 					onFixCommand={handleFixCommand}
 					onSelectChoice={handleSelectChoice}
 				/>
+				{isGeminiLiveActive && <GeminiLiveView onClose={() => setIsGeminiLiveActive(false)} />}
 				<TypingIndicator 
 					logoUri={LOGO_URI} 
 					visible={isTyping && !messages.some(m => m.isStreaming)} 
@@ -334,6 +337,7 @@ const ChatApp: React.FC = () => {
 					workspaceRoot={workspaceRoot}
 					onToggleConsole={() => setConsoleVisible(!consoleVisible)}
 					isConsoleVisible={consoleVisible}
+					onToggleGeminiLive={() => setIsGeminiLiveActive(true)}
 				/>
 				<ChatFooter />
 			</div>
