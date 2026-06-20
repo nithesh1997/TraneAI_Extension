@@ -2,6 +2,12 @@
  * BackendService handles communication between the webview and the extension backend API.
  * It sends chat messages, attachments, and workspace context to the local backend
  * and streams responses back into the extension UI.
+ *
+ * Supports three SSE event types:
+ *   - 'token': Individual content tokens streamed from the AI (append to fullText)
+ *   - 'step':  Tool execution step notifications (prepended to fullText)
+ *   - 'done':  Signals end of stream
+ *   - 'error': Server-side error during streaming
  */
 export class BackendService {
     public static async sendChatMessage(
@@ -57,30 +63,65 @@ export class BackendService {
             }
 
             let fullText = '';
+            let steps: string[] = [];
             const decoder = new TextDecoder();
+            let sseBuffer = '';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n');
+                sseBuffer += decoder.decode(value, { stream: true });
+                const lines = sseBuffer.split('\n');
+                // Keep the last (possibly incomplete) line in the buffer
+                sseBuffer = lines.pop() || '';
 
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const data = JSON.parse(line.slice(6));
-                        if (data.type === 'step') {
-                            fullText += (fullText ? '\n' : '') + data.content;
-                            onUpdate(fullText, false);
-                        } else if (data.type === 'final') {
-                            fullText = data.content;
-                            onUpdate(fullText, true);
-                        }
+                    if (!line.startsWith('data: ')) continue;
+
+                    let data: any;
+                    try {
+                        data = JSON.parse(line.slice(6));
+                    } catch {
+                        continue;
+                    }
+
+                    if (data.type === 'token') {
+                        // Append individual token to the running content
+                        fullText += data.content;
+                        // Build display text: steps + content
+                        const displayText = steps.length > 0
+                            ? steps.join('\n') + '\n\n' + fullText
+                            : fullText;
+                        onUpdate(displayText, false);
+                    } else if (data.type === 'step') {
+                        steps.push(data.content);
+                        const displayText = steps.join('\n') + (fullText ? '\n\n' + fullText : '');
+                        onUpdate(displayText, false);
+                    } else if (data.type === 'done') {
+                        // Stream complete
+                        const displayText = steps.length > 0
+                            ? steps.join('\n') + '\n\n' + fullText
+                            : fullText;
+                        onUpdate(displayText, true);
+                    } else if (data.type === 'error') {
+                        const errorText = `Error: ${data.content}`;
+                        onUpdate(errorText, true);
+                        return errorText;
+                    } else if (data.type === 'final') {
+                        // Legacy support: some older backends may still send 'final'
+                        fullText = data.content;
+                        onUpdate(fullText, true);
                     }
                 }
             }
 
-            return fullText;
+            // If we exit the loop without a 'done' event, finalize
+            const finalText = steps.length > 0
+                ? steps.join('\n') + '\n\n' + fullText
+                : fullText;
+            onUpdate(finalText, true);
+            return finalText;
         } catch (error: any) {
             console.error('TraneAI API Error:', error);
             const errorMsg = `Backend API error: ${error.message || 'Something went wrong'}`;

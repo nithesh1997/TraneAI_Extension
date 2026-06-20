@@ -217,6 +217,20 @@ textarea {
   gap: 5px;
   padding: 5px 8px;
   width: 100%;
+
+  &.neo {
+    #selected-model {
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      font-weight: 600;
+    }
+
+    .model-dot {
+      background: var(--accent-gradient);
+    }
+  }
 }
 
 .model-dot {
@@ -341,10 +355,54 @@ textarea {
     background: var(--bg-tertiary);
     color: var(--text-primary);
   }
+
+  &.selected {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
+    color: var(--accent);
+    cursor: default;
+
+    .skills-item-icon {
+      color: var(--accent);
+    }
+
+    .item-check {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--accent);
+    }
+  }
 }
 
 .skills-item-icon {
   font-size: 14px;
+}
+
+.selected-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 14px 0 14px;
+
+  .neo-mention {
+    font-size: 11px;
+    padding: 1px 8px;
+    line-height: 1.6;
+
+    button {
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.7);
+      cursor: pointer;
+      padding: 0 2px;
+      font-size: 14px;
+      line-height: 1;
+      transition: color 0.15s;
+
+      &:hover {
+        color: #fff;
+      }
+    }
+  }
 }
 
 .kbd {

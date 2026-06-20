@@ -1393,3 +1393,264 @@
     }
   }
 }
+
+// Agent action step styles (for ActionStepView in Message.tsx)
+.agent-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  animation: fadeSlide 0.2s ease both;
+  position: relative;
+  overflow: hidden;
+
+  &.clickable {
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+
+    &:hover {
+      background: rgba(88, 166, 255, 0.08);
+      border-color: rgba(88, 166, 255, 0.25);
+    }
+  }
+
+  &.agent-step-pending {
+    opacity: 0.8;
+  }
+
+  &.agent-step-done {
+    border-color: rgba(63, 185, 80, 0.25);
+    background: rgba(63, 185, 80, 0.04);
+  }
+
+  &.agent-step-active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.15);
+  }
+}
+
+.agent-step-track {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+
+  .agent-step-track-fill {
+    width: 100%;
+    height: 0;
+    background: var(--accent);
+    transition: height 0.3s ease;
+
+    .agent-step-done & {
+      height: 100%;
+      background: var(--success);
+    }
+
+    .agent-step-active & {
+      height: 100%;
+    }
+  }
+}
+
+.agent-step-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  position: relative;
+  z-index: 1;
+
+  &.exploring { color: #58a6ff; }
+  &.read { color: #3fb950; }
+  &.analyzing { color: #a855f7; }
+  &.command { color: #d29922; }
+  &.writing { color: #f97583; }
+}
+
+.agent-step-content {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+.agent-step-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.agent-step-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: color 0.2s;
+
+  &:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  .detail-file-icon {
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+}
+
+.agent-step-check {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+}
+
+.agent-step-loader {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+}
+
+.agent-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.6;
+  animation: stepDotPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes stepDotPulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+.neo-mention {
+  display: inline-block;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: #fff;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+// ThinkBlock styles
+.think-block {
+  margin: 12px 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+
+  &.think-streaming {
+    border-color: rgba(168, 85, 247, 0.3);
+  }
+
+  .think-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.2s, color 0.2s;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-secondary);
+    }
+  }
+
+  .think-icon-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    opacity: 0.8;
+  }
+
+  .think-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(168, 85, 247, 0.2);
+    border-top-color: #a855f7;
+    border-radius: 50%;
+    animation: think-spin 1s linear infinite;
+  }
+
+  .think-label {
+    flex: 1;
+    font-weight: 500;
+  }
+
+  .think-chevron {
+    opacity: 0.6;
+    transition: transform 0.2s;
+    &.expanded {
+      transform: rotate(180deg);
+    }
+  }
+
+  .think-body {
+    padding: 0 12px 12px 36px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+    border-top: 1px solid transparent;
+  }
+
+  .think-content {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: inherit;
+    opacity: 0.8;
+    max-height: 400px;
+    overflow-y: auto;
+    
+    &::-webkit-scrollbar {
+      width: 4px;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+    }
+  }
+}
+
+@keyframes think-spin {
+  to { transform: rotate(360deg); }
+}

@@ -109,10 +109,6 @@ const ChatApp: React.FC = () => {
 					break;
 				case 'consoleLogs':
 					setConsoleLogs(message.logs);
-					// Auto-show console if there are errors
-					if (message.logs.some((l: LogEntry) => l.level === LogLevel.Error)) {
-						setConsoleVisible(true);
-					}
 					break;
 			}
 		};

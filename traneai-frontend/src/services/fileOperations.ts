@@ -109,6 +109,74 @@ export async function editFile(
 	return `[EDIT_PROPOSAL]\nfile: ${uri.fsPath}\nold: |\n${oldText}\nnew: |\n${newText}\nstatus: ready\nmessage: Targeted edit proposal\n[END_EDIT]`;
 }
 
+function fuzzyFindMatch(haystack: string, needle: string): { index: number, text: string } | null {
+	const exactIdx = haystack.indexOf(needle);
+	if (exactIdx !== -1) return { index: exactIdx, text: needle };
+
+	const nNeedle = needle.replace(/["']/g, "'");
+	const nHaystack = haystack.replace(/["']/g, "'");
+	const qIdx = nHaystack.indexOf(nNeedle);
+	if (qIdx !== -1) return { index: qIdx, text: haystack.substring(qIdx, qIdx + needle.length) };
+
+	interface Char { char: string; index: number; }
+	const hChars: Char[] = [];
+	for (let i = 0; i < haystack.length; i++) {
+		if (!/\s/.test(haystack[i])) {
+			hChars.push({ char: haystack[i] === '"' ? "'" : haystack[i], index: i });
+		}
+	}
+
+	const nChars: string[] = [];
+	for (let i = 0; i < needle.length; i++) {
+		if (!/\s/.test(needle[i])) {
+			nChars.push(needle[i] === '"' ? "'" : needle[i]);
+		}
+	}
+
+	if (nChars.length === 0) return null;
+
+	for (let i = 0; i <= hChars.length - nChars.length; i++) {
+		let match = true;
+		for (let j = 0; j < nChars.length; j++) {
+			if (hChars[i + j].char !== nChars[j]) {
+				match = false;
+				break;
+			}
+		}
+		if (match) {
+			let startIndex = hChars[i].index;
+			let endIndex = hChars[i + nChars.length - 1].index;
+
+			const leadingWsMatch = needle.match(/^(\s+)/);
+			if (leadingWsMatch) {
+				let hWsStart = startIndex;
+				while (hWsStart > 0 && /\s/.test(haystack[hWsStart - 1])) {
+					if (haystack[hWsStart - 1] === '\n' && !leadingWsMatch[1].includes('\n')) break;
+					hWsStart--;
+				}
+				startIndex = hWsStart;
+			}
+
+			const trailingWsMatch = needle.match(/(\s+)$/);
+			if (trailingWsMatch) {
+				let hWsEnd = endIndex;
+				while (hWsEnd < haystack.length - 1 && /\s/.test(haystack[hWsEnd + 1])) {
+					if (haystack[hWsEnd + 1] === '\n' && !trailingWsMatch[1].includes('\n')) break;
+					hWsEnd++;
+				}
+				endIndex = hWsEnd;
+			}
+
+			return {
+				index: startIndex,
+				text: haystack.substring(startIndex, endIndex + 1)
+			};
+		}
+	}
+
+	return null;
+}
+
 export async function editFileByPath(
 	filePath: string,
 	oldText: string,
@@ -130,11 +198,16 @@ export async function editFileByPath(
 		const doc = await vscode.workspace.openTextDocument(uri);
 		const fullText = doc.getText();
 		
-		if (!fullText.includes(oldText)) {
-			return 'Error: Text not found in file';
+		// Use whitespace-agnostic fuzzy matching
+		const match = fuzzyFindMatch(fullText, oldText);
+		if (!match) {
+			return 'Error: Text not found in file. Try reading the file first to get the exact content.';
 		}
 		
-		return editFile(uri, oldText, newText);
+		// Extract the actual matched text (preserves original whitespace)
+		const actualOldText = match.text;
+		
+		return editFile(uri, actualOldText, newText);
 	} catch (error: any) {
 		return `Error: ${error.message || 'Failed to edit file'}`;
 	}

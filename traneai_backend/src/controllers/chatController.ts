@@ -1,28 +1,21 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import { ChatRequest, QuickActionRequest } from '../types/index.js';
-import { generateAIResponse, generateVisionResponse } from '../services/aiService.js';
-import { generateExplanation, generateReview, generateTests } from '../services/codeAnalysisService.js';
+import { generateAIResponse, generateAIResponseStreaming } from '../services/aiService.js';
+import { generateDeepExplanation, formatDeepExplanation, generateExplanation, generateReview, generateTests } from '../services/codeAnalysisService.js';
 
 export async function handleChatMessage(req: Request, res: Response): Promise<void> {
   const isStream = req.query.stream === 'true';
 
   try {
     const uploadedFiles = Array.isArray(req.files) ? req.files as Express.Multer.File[] : [];
+
+    let images: { base64: string; mimeType: string }[] | undefined;
     if (uploadedFiles.length > 0) {
-      const userInput = req.body.message;
-      if (!userInput) {
-        res.status(400).json({ error: 'Message required with image' });
-        return;
-      }
-      const images = uploadedFiles.map(file => {
+      images = uploadedFiles.map(file => {
         const imageBuffer = fs.readFileSync(file.path);
         return { base64: imageBuffer.toString('base64'), mimeType: file.mimetype || 'image/jpeg' };
       });
-      const reply = await generateVisionResponse(userInput, images);
-      for (const file of uploadedFiles) { fs.unlinkSync(file.path); }
-      res.json({ message: reply });
-      return;
     }
 
     const { message, model, context, workspaceRoot, pinnedFiles } = req.body as ChatRequest;
@@ -44,18 +37,53 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
 
-      const onStep = (step: string) => {
-        res.write(`data: ${JSON.stringify({ type: 'step', content: step })}\n\n`);
+      let fullContent = '';
+
+      const onToken = (token: string) => {
+        fullContent += token;
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`);
+        } catch {}
       };
 
-      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, onStep, pinnedFilesArray);
-      res.write(`data: ${JSON.stringify({ type: 'final', content: reply })}\n\n`);
+      const onStep = (step: string) => {
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'step', content: step })}\n\n`);
+        } catch {}
+      };
+
+      try {
+        await generateAIResponseStreaming(
+          message,
+          history,
+          context,
+          workspaceRoot,
+          model,
+          onToken,
+          onStep,
+          pinnedFilesArray,
+          images
+        );
+
+        // Send final signal so the frontend knows streaming is complete
+        res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      } catch (streamError: any) {
+        console.error('Streaming error:', streamError);
+        res.write(`data: ${JSON.stringify({ type: 'error', content: streamError.message || 'Stream failed' })}\n\n`);
+      }
+
       res.end();
     } else {
-      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, undefined, pinnedFilesArray);
+      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, undefined, pinnedFilesArray, images);
       res.json({ message: reply });
+    }
+
+    // Clean up uploaded image files
+    for (const file of uploadedFiles) {
+      try { fs.unlinkSync(file.path); } catch {}
     }
   } catch (error) {
     console.error('Chat error:', error);
@@ -83,7 +111,8 @@ export async function handleQuickAction(req: Request, res: Response): Promise<vo
 
     switch (action) {
       case 'explain':
-        responseText = generateExplanation(fileName, language, content, lineCount);
+        const deepExplanation = generateDeepExplanation(fileName, language, content, lineCount);
+        responseText = formatDeepExplanation(fileName, language, lineCount, deepExplanation);
         break;
       case 'review':
         responseText = generateReview(fileName, language, content, lineCount);

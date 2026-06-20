@@ -90,6 +90,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	const [branchSearch, setBranchSearch] = useState('');
 	const [showBranchDropdown, setShowBranchDropdown] = useState(false);
 	const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+	const [selectedSkillTags, setSelectedSkillTags] = useState<string[]>([]);
 	const [filteredFiles, setFilteredFiles] = useState<string[]>([]);
 	const [filteredFolders, setFilteredFolders] = useState<string[]>([]);
 	const [showFileDropdown, setShowFileDropdown] = useState(false);
@@ -218,7 +219,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		const textBeforeCursor = text.substring(0, cursorPosition);
 		const lastAtSymbolIndex = textBeforeCursor.lastIndexOf('@');
 		
-		const newText = text.substring(0, lastAtSymbolIndex) + '@' + fileName + ' ' + text.substring(cursorPosition);
+		const newText = text.substring(0, lastAtSymbolIndex) + text.substring(cursorPosition);
 		setText(newText);
 		
 		if (!attachedFiles.find(f => f.name === fileName)) {
@@ -234,7 +235,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		const textBeforeCursor = text.substring(0, cursorPosition);
 		const lastAtSymbolIndex = textBeforeCursor.lastIndexOf('@');
 		
-		const newText = text.substring(0, lastAtSymbolIndex) + '@' + folderName + ' ' + text.substring(cursorPosition);
+		const newText = text.substring(0, lastAtSymbolIndex) + text.substring(cursorPosition);
 		setText(newText);
 		
 		if (!attachedFiles.find(f => f.name === folderName)) {
@@ -260,25 +261,24 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		const hasImages = attachedFiles.some(f => f.type === 'image');
 		const prioritizeInput = hasTicketNumber || hasImages;
 
-		// Add selected mode as a skill if not already present in the text
+		// Add selected mode and skills
 		let finalChatText = text;
 		const modeSkill = `@${currentModel}`;
-		
+		const skillsPrefix = selectedSkillTags.length > 0
+			? selectedSkillTags.map(s => `@${s}`).join(' ') + ' '
+			: '';
+
 		// If QA mode and Research skill are active, and a branch is selected
-		if (currentModel === 'qa' && selectedSkill === 'research' && selectedBranch && !prioritizeInput) {
-			const researchSkill = `@research`;
-			if (!text.includes(researchSkill)) {
-				finalChatText = `${modeSkill} ${researchSkill} Branch: ${selectedBranch} ${text}`;
-			} else if (!text.includes('Branch:')) {
-				finalChatText = text.replace(researchSkill, `${researchSkill} Branch: ${selectedBranch}`);
-				finalChatText = `${modeSkill} ${finalChatText}`;
-			} else {
-				finalChatText = `${modeSkill} ${text}`;
-			}
-		} else if (text.trim() && !text.includes(modeSkill) && currentModel !== 'auto') {
-			finalChatText = `${modeSkill} ${text}`;
-		} else if (!text.trim() && currentModel !== 'auto') {
-			finalChatText = `${modeSkill}`;
+		if (currentModel === 'qa' && selectedSkillTags.includes('research') && selectedBranch && !prioritizeInput) {
+			finalChatText = `${modeSkill} ${skillsPrefix}Branch: ${selectedBranch} ${text}`;
+		} else if (currentModel !== 'auto') {
+			finalChatText = text.trim()
+				? `${modeSkill} ${skillsPrefix}${text}`
+				: `${modeSkill} ${skillsPrefix}`.trim();
+		} else {
+			finalChatText = text.trim()
+				? `${skillsPrefix}${text}`
+				: skillsPrefix.trim();
 		}
 
 		if (codeBlocks.length > 0) {
@@ -320,6 +320,8 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		setCodeBlocks([]);
 		setConsoleLogs([]);
 		setSelectedConsoleFilter(null);
+		setSelectedSkillTags([]);
+		setSelectedSkill(null);
 		
 		// Keep only pinned files for the next message
 		const nextAttachedFiles = attachedFiles.filter(f => f.isPinned);
@@ -459,15 +461,23 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	};
 
 	const selectSkill = (skill: string) => {
-		const newText = (text ? text + ' ' : '') + '@' + skill + ' ';
-		setText(newText);
+		if (selectedSkillTags.includes(skill)) return;
+		setSelectedSkillTags(prev => [...prev, skill]);
 		setSelectedSkill(skill);
 		setShowSkillsDropdown(false);
 		textareaRef.current?.focus();
 	};
 
+	const removeSkill = (skill: string) => {
+		setSelectedSkillTags(prev => prev.filter(s => s !== skill));
+		setSelectedSkill(prev => prev === skill ? null : prev);
+		textareaRef.current?.focus();
+	};
+
 	const charCount = text.length;
 	const counterClass = charCount > 1000 ? 'danger' : charCount > 800 ? 'warn' : '';
+
+	const selectedSkillsSet = new Set(selectedSkillTags);
 
 	useEffect(() => {
 		const currentModelData = MODELS.find(m => m.id === currentModel);
@@ -475,7 +485,8 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 			setAttachedFiles([]);
 			onFilesSelected([]);
 		}
-		setSelectedSkill(null); // Reset skill when model changes
+		setSelectedSkill(null);
+		setSelectedSkillTags([]); // Reset skills when model changes
 	}, [currentModel]);
 
 	useEffect(() => {
@@ -586,7 +597,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 						))}
 					</div>
 				)}
-				{currentModel === 'qa' && (selectedSkill === 'research' || text.includes('@research')) && workspaceBranches.length > 0 && (
+				{currentModel === 'qa' && selectedSkillTags.includes('research') && workspaceBranches.length > 0 && (
 					<div className="branch-selector-row" style={{ padding: '4px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
 						<span style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Branch</span>
 						<div className="branch-selector-custom" style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
@@ -705,6 +716,23 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 						</div>
 					</div>
 				)}
+				{selectedSkillTags.length > 0 && (
+					<div className="selected-skills" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '4px 14px 0 14px' }}>
+						{selectedSkillTags.map(skill => (
+							<span key={skill} className="neo-mention" style={{ cursor: 'default', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+								@{skill}
+								<button
+									onClick={(e) => { e.stopPropagation(); removeSkill(skill); }}
+									style={{
+										background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)',
+										cursor: 'pointer', padding: '0 2px', fontSize: '14px', lineHeight: '1'
+									}}
+									title={`Remove @${skill}`}
+								>×</button>
+							</span>
+						))}
+					</div>
+				)}
 				<textarea
 					ref={textareaRef}
 					id="chat-input"
@@ -811,8 +839,9 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 								<div className="skills-dropdown show" id="skills-dropdown">
 									<div className="skills-header">Skills</div>
 									{SKILLS.filter(skill => (MODE_SKILLS[currentModel] || []).includes(skill.id)).map(skill => (
-										<div key={skill.id} className="skills-item" onClick={() => selectSkill(skill.id)}>
+										<div key={skill.id} className={`skills-item ${selectedSkillsSet.has(skill.id) ? 'selected' : ''}`} onClick={() => selectSkill(skill.id)}>
 											<span className="skills-item-icon">{skill.icon}</span>{skill.id}
+											{selectedSkillsSet.has(skill.id) && <span className="item-check">✓</span>}
 										</div>
 									))}
 								</div>
@@ -820,7 +849,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 						</div>
 
 						<div className="model-selector">
-							<div className="model-trigger" onClick={(e) => { e.stopPropagation(); setShowModelDropdown(!showModelDropdown); setShowSkillsDropdown(false); }}>
+							<div className={`model-trigger ${currentModel !== 'auto' ? 'neo' : ''}`} onClick={(e) => { e.stopPropagation(); setShowModelDropdown(!showModelDropdown); setShowSkillsDropdown(false); }}>
 								<div className="model-dot"></div>
 								<span id="selected-model">{currentModelData?.name || currentModel}</span>
 								<svg width="9" height="9" viewBox="0 0 16 16" fill="none">

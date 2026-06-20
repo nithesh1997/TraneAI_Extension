@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import * as fileOps from './fileOperations';
 
 export interface ToolDefinition {
@@ -149,6 +150,24 @@ export const FILE_TOOL_DEFINITIONS: ToolDefinition[] = [
 				name: 'file_pattern',
 				type: 'string',
 				description: 'Glob pattern for files to search (e.g., "**/*.ts")',
+				required: false
+			}
+		]
+	},
+	{
+		name: 'fuzzy_find_file',
+		description: 'Fuzzy find a file by partial name. Uses VS Code\'s fast file search. E.g. "userServ" finds "userService.ts". Returns matching file paths ranked by relevance.',
+		parameters: [
+			{
+				name: 'query',
+				type: 'string',
+				description: 'Partial filename to search for (e.g., "userServ", "app.comp", "style")',
+				required: true
+			},
+			{
+				name: 'file_pattern',
+				type: 'string',
+				description: 'Optional glob pattern to narrow search (e.g., "**/*.ts", "**/*.component.ts")',
 				required: false
 			}
 		]
@@ -315,6 +334,62 @@ export async function executeTool(
 					success: true,
 					message: message || 'No matches found',
 					data: matches
+				};
+			}
+			
+			case 'fuzzy_find_file': {
+				const workspaceFolders = vscode.workspace.workspaceFolders;
+				if (!workspaceFolders || workspaceFolders.length === 0) {
+					return { success: false, message: 'No workspace open' };
+				}
+				
+				const query = (params.query || '').toLowerCase();
+				const filePattern = params.file_pattern || '**/*';
+				
+				const files = await vscode.workspace.findFiles(filePattern, '**/node_modules/**');
+				
+				// Score each file path by how well it matches the query
+				const scored: Array<{ path: string; score: number }> = [];
+				for (const file of files) {
+					const relPath = file.fsPath.replace(workspaceFolders[0].uri.fsPath + '/', '');
+					const fileName = path.basename(relPath);
+					const fileNameLower = fileName.toLowerCase();
+					const relPathLower = relPath.toLowerCase();
+					
+					let score = 0;
+					
+					// Exact match (whole word)
+					if (fileNameLower === query) score += 100;
+					// Starts with
+					if (fileNameLower.startsWith(query)) score += 50;
+					// Contains
+					if (fileNameLower.includes(query)) score += 25;
+					// Fuzzy (each character appears in order)
+					let qi = 0;
+					for (const ch of fileNameLower) {
+						if (qi < query.length && ch === query[qi]) qi++;
+					}
+					if (qi === query.length && query.length > 1) score += 40 - query.length;
+					// Bonus for shorter paths (higher in tree)
+					const depth = relPath.split('/').length;
+					score -= depth * 2;
+					
+					if (score > 0) {
+						scored.push({ path: relPath, score });
+					}
+				}
+				
+				scored.sort((a, b) => b.score - a.score);
+				const topResults = scored.slice(0, 15);
+				
+				const message = topResults
+					.map((r, i) => `${i + 1}. \`${r.path}\``)
+					.join('\n');
+				
+				return {
+					success: true,
+					message: message || 'No matching files found',
+					data: topResults
 				};
 			}
 			

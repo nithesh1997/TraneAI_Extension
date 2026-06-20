@@ -6,6 +6,8 @@
 import { ChatViewProvider } from '../ChatViewProvider';
 import { ConsoleService, LogLevel, LogSource } from './ConsoleService';
 import * as vscode_api from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export function handleWebviewMessage(provider: ChatViewProvider, data: any, vscode: any) {
     switch (data.command) {
@@ -31,6 +33,24 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
             if (!provider.currentSessionId) {
                 provider.createNewSession();
             }
+
+            // Read attached file contents and append to message
+            let enrichedText = data.text;
+            const fileAttachments = (data.attachments || []).filter((a: any) => a.type === 'file');
+            for (const file of fileAttachments) {
+                if (file.path) {
+                    const workspaceRoot = provider.findWorkspaceAppRoot();
+                    if (workspaceRoot) {
+                        const fullPath = path.join(workspaceRoot, file.path);
+                        try {
+                            const content = fs.readFileSync(fullPath, 'utf-8');
+                            enrichedText += `\n\nFile: ${file.path}\n\`\`\`\n${content}\n\`\`\``;
+                        } catch {
+                            enrichedText += `\n\n[File not found: ${file.path}]`;
+                        }
+                    }
+                }
+            }
             provider.addMessage('user', data.text, data.attachments);
 
             const hasConsoleAttachment = (data.attachments || []).some((a: any) => a.type === 'console');
@@ -55,7 +75,7 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
 
             provider.broadcastTyping(true);
             provider.abortController = new AbortController();
-            provider.sendToBackend(data.text, data.model, data.attachments, provider.abortController.signal).then(() => {
+            provider.sendToBackend(enrichedText, data.model, data.attachments, provider.abortController.signal).then(() => {
                 provider.broadcastTyping(false);
                 provider.saveCurrentSession();
                 provider.broadcastHistoryList();

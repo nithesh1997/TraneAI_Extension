@@ -45,7 +45,7 @@ export const AI_TOOLS = [
     type: 'function' as const,
     function: {
       name: 'edit_file',
-      description: 'Make targeted, minimal edits to a specific section of an existing file. Use this to change specific text, rename identifiers, or modify small code sections. ALWAYS use this for edits - never use write_file for modifications. Only modifies the exact text you specify - preserves all other code, formatting, and whitespace.',
+      description: 'Make targeted, minimal edits to a specific section of an existing file. Uses smart matching so minor whitespace/indentation differences are OK. ALWAYS use this for edits - never use write_file for modifications. Only modifies the exact section you specify - preserves all other code, formatting, and whitespace.',
       parameters: {
         type: 'object',
         properties: {
@@ -69,6 +69,21 @@ export const AI_TOOLS = [
           content: { type: 'string', description: 'The complete new content for the file' },
         },
         required: ['filePath', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'fuzzy_find_file',
+      description: 'Fuzzy find files by partial name match. Use to quickly locate files when you know part of the filename but not the full path. E.g. "userServ" finds "userService.ts", "app.comp" finds "app.component.ts". Returns up to 15 matching file paths ranked by relevance.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Partial filename to search for (e.g., "userServ", "app.comp", "style")' },
+          max_results: { type: 'number', description: 'Maximum number of results to return (default: 15)' },
+        },
+        required: ['query'],
       },
     },
   },
@@ -126,5 +141,89 @@ export const AI_TOOLS = [
 				required: ['changes']
 			}
 		}
-	}
+	},
+  {
+    type: 'function' as const,
+    function: {
+      name: 'analyze_impact',
+      description: 'Analyze the multi-file impact of changing a specific file or symbol. Shows which files will be affected, what depends on the changed code, and what the change depends on. Essential before making cross-file changes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: 'Relative path from workspace root to the file being changed' },
+          symbolName: { type: 'string', description: '(Optional) Specific symbol/export within the file to check impact for' },
+        },
+        required: ['filePath'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'search_symbol',
+      description: 'Search for a symbol (function, class, interface, variable) across the entire workspace. Shows all files that contain the symbol with line numbers and definition type.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'The symbol name to search for (e.g., "UserService", "getUserById", "AuthGuard")' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'find_references',
+      description: 'Find all references to a symbol across the workspace. Shows every location where the symbol is used, imported, or referenced, grouped by file. Use to understand the full impact of renaming or refactoring.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbolName: { type: 'string', description: 'The symbol name to find all references for (e.g., "UserService", "isAuthenticated")' },
+        },
+        required: ['symbolName'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'investigate_error',
+      description: 'Analyze an error message with stack trace to identify the root cause, affected files, and suggested fix. Use this when the user provides an error message or when troubleshooting issues.',
+      parameters: {
+        type: 'object',
+        properties: {
+          errorMessage: { type: 'string', description: 'The full error message including stack trace' },
+        },
+        required: ['errorMessage'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'get_architecture',
+      description: 'Get the overall architecture overview of the workspace. Shows technology stack, project structure, key directories, and component relationships. Use to understand how the project is organized.',
+      parameters: {
+        type: 'object',
+        properties: {
+          detail: { type: 'string', enum: ['overview', 'components'], description: 'Detail level: "overview" for high-level architecture, "components" for component/service breakdown (default: "overview")' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'explain_code_deeply',
+      description: 'Get a deep, structured explanation of code in a file. Returns purpose, data flow, dependencies, side effects, architecture decisions, and recommendations. Use when the user asks "how does this work", "explain this", or "what does this do".',
+      parameters: {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: 'Relative path from workspace root to the file to explain' },
+        },
+        required: ['filePath'],
+      },
+    },
+  },
 ];

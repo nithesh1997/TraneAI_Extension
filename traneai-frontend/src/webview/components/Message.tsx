@@ -8,6 +8,7 @@ export interface EditProposal {
 
 type MessagePart =
   | { type: 'markdown'; content: string }
+  | { type: 'think'; content: string; isStreaming?: boolean }
   | { type: 'command'; cmd: string; status: string; output: string; duration?: number }
   | { type: 'actionStep'; label: string; detail?: string; status: 'pending' | 'success' | 'error' }
   | { type: 'editProposal'; edit: EditProposal }
@@ -174,6 +175,7 @@ const processInlineMarkdown = (text: string): string => {
 		.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 		.replace(/`([^`]+)`/g, '<code>$1</code>')
 		.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+		.replace(/@(\w[\w-]*)/g, '<span class="neo-mention">@$1</span>')
 		.replace(/\n/g, '<br/>');
 };
 
@@ -187,20 +189,36 @@ const renderMarkdown = (text: string): string => {
 		if (match.index > lastIndex) {
 			parts.push(processInlineMarkdown(text.substring(lastIndex, match.index)));
 		}
-		const lang = match[1] || 'plaintext';
+		const lang = (match[1] || 'plaintext').trim() || 'plaintext';
 		const code = match[2]
 			.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 		parts.push(
-			`<div class="md-code-block">` +
-			`<div class="md-code-header"><span class="md-code-lang">${lang}</span></div>` +
-			`<pre><code class="language-${lang}">${code}</code></pre>` +
+			`<div class="code-palette">` +
+			`<div class="code-palette-header"><span class="code-palette-lang">${lang}</span></div>` +
+			`<div class="code-palette-body"><pre><code class="language-${lang}">${code}</code></pre></div>` +
 			`</div>`
 		);
 		lastIndex = codeBlockRegex.lastIndex;
 	}
 
-	if (lastIndex < text.length) {
-		parts.push(processInlineMarkdown(text.substring(lastIndex)));
+	const remainingText = text.substring(lastIndex);
+	const openCodeBlockMatch = remainingText.match(/```(\w*)\n?([\s\S]*)$/);
+
+	if (openCodeBlockMatch) {
+		const preMatchText = remainingText.substring(0, openCodeBlockMatch.index);
+		if (preMatchText) parts.push(processInlineMarkdown(preMatchText));
+		
+		const lang = (openCodeBlockMatch[1] || 'plaintext').trim() || 'plaintext';
+		const code = openCodeBlockMatch[2]
+			.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		parts.push(
+			`<div class="code-palette streaming-code">` +
+			`<div class="code-palette-header"><span class="code-palette-lang">${lang}</span><div class="inline-loader" style="padding:0; margin-left:8px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>` +
+			`<div class="code-palette-body"><pre><code class="language-${lang}">${code}</code></pre></div>` +
+			`</div>`
+		);
+	} else if (remainingText) {
+		parts.push(processInlineMarkdown(remainingText));
 	}
 
 	return parts.join('');
@@ -208,22 +226,119 @@ const renderMarkdown = (text: string): string => {
 
 // --- Components ---
 
+const SvgIcon: React.FC<{ type: string; className?: string }> = ({ type, className }) => {
+	switch (type) {
+		case 'exploring':
+			return (
+				<svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none">
+					<path d="M1.5 3.5a1 1 0 011-1h4l1.5 1.5h6.5a1 1 0 011 1v7a1 1 0 01-1 1h-12a1 1 0 01-1-1v-8.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+					<path d="M8.5 7.5L11 10M8.5 10L11 7.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+				</svg>
+			);
+		case 'read':
+			return (
+				<svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none">
+					<path d="M2.5 3.5h11v9h-11v-9z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+					<path d="M5.5 6.5h5M5.5 8.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+				</svg>
+			);
+		case 'analyzing':
+			return (
+				<svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none">
+					<circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.3"/>
+					<path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+					<path d="M5.5 7l1 1 2-2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+				</svg>
+			);
+		case 'command':
+			return (
+				<svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none">
+					<rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+					<path d="M5 7h6M5 9h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+					<circle cx="6" cy="6" r="0.5" fill="currentColor"/>
+				</svg>
+			);
+		case 'writing':
+			return (
+				<svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none">
+					<path d="M3 13l.5-3L10 3.5 12.5 6 6 12.5 3 13z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+					<path d="M8.5 4l2.5 2.5" stroke="currentColor" strokeWidth="1.2"/>
+				</svg>
+			);
+		default:
+			return (
+				<svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none">
+					<circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.3"/>
+					<path d="M8 5v3.5l2 1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+				</svg>
+			);
+	}
+};
+
+// --- ThinkBlock: Copilot-style collapsible reasoning view ---
+const ThinkBlock: React.FC<{ content: string; isStreaming?: boolean }> = ({ content, isStreaming }) => {
+	const [expanded, setExpanded] = React.useState(false);
+	const trimmed = content.trim();
+	const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+
+	return (
+		<div className={`think-block ${isStreaming ? 'think-streaming' : ''}`}>
+			<button className="think-header" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
+				<div className="think-icon-wrap">
+					{isStreaming ? (
+						<div className="think-spinner" />
+					) : (
+						<svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+							<circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" opacity="0.7"/>
+							<path d="M6 6c0-1.1.9-2 2-2s2 .9 2 2c0 .8-.5 1.5-1.2 1.8L8 8.5V10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+							<circle cx="8" cy="12" r="0.7" fill="currentColor"/>
+						</svg>
+					)}
+				</div>
+				<span className="think-label">
+					{isStreaming ? 'Thinking...' : `Thought for ${wordCount} word${wordCount !== 1 ? 's' : ''}`}
+				</span>
+				<svg
+					className={`think-chevron ${expanded ? 'expanded' : ''}`}
+					width="12" height="12" viewBox="0 0 16 16" fill="none"
+				>
+					<path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+				</svg>
+			</button>
+			{expanded && (
+				<div className="think-body">
+					<pre className="think-content">{trimmed}</pre>
+				</div>
+			)}
+		</div>
+	);
+};
+
+const getActionIconType = (label: string): string => {
+	const low = label.toLowerCase();
+	if (low.includes('explor')) return 'exploring';
+	if (low.includes('read')) return 'read';
+	if (low.includes('analyz')) return 'analyzing';
+	if (low.includes('command') || low.includes('run')) return 'command';
+	if (low.includes('writ') || low.includes('edit') || low.includes('creat')) return 'writing';
+	return 'default';
+};
+
 const ActionStepView: React.FC<{ 
 	label: string; 
 	detail?: string; 
 	status: string;
 	onOpenFile?: (path: string) => void;
 }> = ({ label, detail, status, onOpenFile }) => {
-	const getIcon = () => {
-		if (status === 'pending') return '⋯';
-		
-		const lowLabel = label.toLowerCase();
-		if (lowLabel.includes('exploring')) return '📁';
-		if (lowLabel.includes('read file')) return '📄';
-		if (lowLabel.includes('analyzing')) return '🔍';
-		if (lowLabel.includes('command')) return '⌨️';
-		return '✓';
-	};
+	const [visible, setVisible] = React.useState(false);
+	const iconType = getActionIconType(label);
+	const isPending = status === 'pending';
+	const isComplete = status === 'success' || status === 'completed';
+
+	React.useEffect(() => {
+		const timer = setTimeout(() => setVisible(true), 50);
+		return () => clearTimeout(timer);
+	}, []);
 
 	const handleClick = () => {
 		if (detail && onOpenFile) {
@@ -231,14 +346,51 @@ const ActionStepView: React.FC<{
 		}
 	};
 
+	const handleShowFile = (e: React.MouseEvent) => {
+		e.stopPropagation();
+		if (detail) {
+			const vs = (window as any).vscode;
+			if (vs) vs.postMessage({ command: 'openFile', path: detail.trim() });
+		}
+	};
+
+	if (!visible) return null;
+
 	return (
-		<div 
-			className={`action-step step-${status} ${detail ? 'clickable' : ''}`} 
-			onClick={handleClick}
-		>
-			<span className="step-icon">{getIcon()}</span>
-			<span className="step-label">{label}</span>
-			{detail && <span className="step-detail">{detail}</span>}
+		<div className={`agent-step agent-step-${isComplete ? 'done' : isPending ? 'pending' : 'active'} ${detail ? 'clickable' : ''}`}>
+			<div className="agent-step-track">
+				<div className="agent-step-track-fill" />
+			</div>
+			<div className={`agent-step-icon ${iconType}`}>
+				{isComplete ? (
+					<svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="check-icon">
+						<circle cx="8" cy="8" r="7" fill="var(--success)" opacity="0.15"/>
+						<path d="M5 8.5l2 2 4-4" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+					</svg>
+				) : (
+					<SvgIcon type={iconType} />
+				)}
+			</div>
+			<div className="agent-step-content">
+				<div className="agent-step-label">{label}</div>
+				{detail && (
+					<div className="agent-step-detail" onClick={handleShowFile}>
+						<SvgIcon type="read" className="detail-file-icon" />
+						<span>{detail}</span>
+					</div>
+				)}
+			</div>
+			{isComplete ? (
+				<div className="agent-step-check">
+					<svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+						<path d="M4 8l3 3 5-5" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+					</svg>
+				</div>
+			) : (
+				<div className="agent-step-loader">
+					<div className="agent-step-dot" />
+				</div>
+			)}
 		</div>
 	);
 };
@@ -632,6 +784,42 @@ const ChoiceView: React.FC<{
 
 const parseMessageParts = (text: string): MessagePart[] => {
   const result: MessagePart[] = [];
+
+  // ── 1. Extract <think>...</think> blocks first (including unclosed ones during streaming)
+  const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+  const openThinkRegex = /<think>([\s\S]*)$/; // Unclosed tag = still streaming
+
+  const thinkMatches: { index: number; end: number; part: MessagePart }[] = [];
+  let thinkMatch;
+  while ((thinkMatch = thinkRegex.exec(text)) !== null) {
+    thinkMatches.push({
+      index: thinkMatch.index,
+      end: thinkRegex.lastIndex,
+      part: { type: 'think', content: thinkMatch[1], isStreaming: false }
+    });
+  }
+
+  // Check for unclosed <think> (actively streaming)
+  const textWithoutClosedThinks = text.replace(thinkRegex, '');
+  const openMatch = openThinkRegex.exec(textWithoutClosedThinks);
+  if (openMatch) {
+    const openIdx = text.indexOf('<think>', text.lastIndexOf('</think>') + 1);
+    if (openIdx !== -1 && !thinkMatches.some(m => m.index === openIdx)) {
+      thinkMatches.push({
+        index: openIdx,
+        end: text.length,
+        part: { type: 'think', content: openMatch[1], isStreaming: true }
+      });
+    }
+  }
+
+  // Build text with think blocks removed so other regexes work cleanly
+  let processedText = text;
+  // Replace closed think blocks with a placeholder so indices stay valid
+  processedText = processedText.replace(/<think>[\s\S]*?<\/think>/g, '');
+  processedText = processedText.replace(/<think>[\s\S]*$/, ''); // remove open tag
+
+  // ── 2. All other regexes run on the cleaned text
   const editRegex = /(?:```\r?\n?)?\[EDIT_PROPOSAL\]\r?\nfile: (.*?)\r?\nold: \|\r?\n([\s\S]*?)\r?\nnew: \|\r?\n([\s\S]*?)\r?\nstatus: (.*?)\r?\nmessage: (.*?)\r?\n\[END_EDIT\](?:\r?\n?```)?/g;
   const legacyEditRegex = /(?:```\r?\n?)?\[EDIT_PROPOSAL\]\r?\nfile: (.+?)\r?\nold: \|\r?\n((?:(?!\[EDIT_PROPOSAL\]|\[END_EDIT\]|new: \|)[\s\S])*?)\r?\nnew: \|\r?\n((?:(?!\[EDIT_PROPOSAL\]|\[END_EDIT\])[\s\S])*?)\r?\n\[END_EDIT\](?:\r?\n?```)?/g;
   const stepRegex = /\[STEP\] (.*?) (?:\| (.*?))?\[\/STEP\]/g;
@@ -640,35 +828,35 @@ const parseMessageParts = (text: string): MessagePart[] => {
   const planRegex = /\[PLAN\]\n([\s\S]*?)\n\[\/PLAN\]/g;
   const choiceRegex = /\[CHOICE\]\r?\nchoices: (.*?)\r?\nplaceholder: (.*?)\r?\ncommand: (.*?)\r?\n\[\/CHOICE\]/g;
   const consoleRegex = /\[CONSOLE (.*?)\]\n([\s\S]*?)(?=\n\n|\n\[|$)/g;
-  
+
   const allMatches: { index: number; end: number; part: MessagePart }[] = [];
   let match;
-  while ((match = editRegex.exec(text)) !== null) {
+  while ((match = editRegex.exec(processedText)) !== null) {
     allMatches.push({ index: match.index, end: editRegex.lastIndex, part: { type: 'editProposal', edit: { filePath: match[1], oldContent: match[2], newContent: match[3] } } });
   }
-  while ((match = legacyEditRegex.exec(text)) !== null) {
+  while ((match = legacyEditRegex.exec(processedText)) !== null) {
       if (!allMatches.some(m => m.index === match!.index)) {
           allMatches.push({ index: match.index, end: legacyEditRegex.lastIndex, part: { type: 'editProposal', edit: { filePath: match[1], oldContent: match[2], newContent: match[3] } } });
       }
   }
-  while ((match = stepRegex.exec(text)) !== null) {
+  while ((match = stepRegex.exec(processedText)) !== null) {
     allMatches.push({ index: match.index, end: stepRegex.lastIndex, part: { type: 'actionStep', label: match[1], detail: match[2], status: 'success' } });
   }
-  while ((match = cmdRegex.exec(text)) !== null) {
+  while ((match = cmdRegex.exec(processedText)) !== null) {
       try { const data = JSON.parse(match[1]); allMatches.push({ index: match.index, end: cmdRegex.lastIndex, part: { type: 'command', cmd: data.cmd, status: data.status, output: data.output, duration: data.duration } }); } catch { /* ignore */ }
   }
-  while ((match = cmdProposalRegex.exec(text)) !== null) {
+  while ((match = cmdProposalRegex.exec(processedText)) !== null) {
       allMatches.push({ index: match.index, end: cmdProposalRegex.lastIndex, part: { type: 'command', cmd: match[1], status: match[2], output: '' } });
   }
-  while ((match = planRegex.exec(text)) !== null) {
-	  const stepLines = match[1].split('\n').filter(l => l.trim().startsWith('-'));
-	  const steps = stepLines.map(l => {
+  while ((match = planRegex.exec(processedText)) !== null) {
+	  const stepLines = match[1].split('\n').filter((l: string) => l.trim().startsWith('-'));
+	  const steps = stepLines.map((l: string) => {
 		  const clean = l.trim().slice(1).trim();
 		  return { text: clean, completed: clean.toLowerCase().includes('(done)') || clean.includes('✅') };
 	  });
 	  allMatches.push({ index: match.index, end: planRegex.lastIndex, part: { type: 'plan', steps } });
   }
-  while ((match = choiceRegex.exec(text)) !== null) {
+  while ((match = choiceRegex.exec(processedText)) !== null) {
 	  try {
 		  const choices = JSON.parse(match[1]);
 		  allMatches.push({ 
@@ -683,9 +871,9 @@ const parseMessageParts = (text: string): MessagePart[] => {
 		  });
 	  } catch { /* ignore */ }
   }
-  while ((match = consoleRegex.exec(text)) !== null) {
+  while ((match = consoleRegex.exec(processedText)) !== null) {
       const logLines = match[2].split('\n').filter(Boolean);
-      const logs = logLines.map(line => {
+      const logs = logLines.map((line: string) => {
           const typeMatch = line.match(/^(\w+): (.*)/);
           if (typeMatch) {
               return { type: typeMatch[1].toLowerCase(), text: typeMatch[2] };
@@ -698,14 +886,47 @@ const parseMessageParts = (text: string): MessagePart[] => {
   allMatches.sort((a, b) => a.index - b.index);
   let lastIndex = 0;
   for (const m of allMatches) {
-    if (m.index > lastIndex) result.push({ type: 'markdown', content: text.substring(lastIndex, m.index) });
+    if (m.index > lastIndex) result.push({ type: 'markdown', content: processedText.substring(lastIndex, m.index) });
     result.push(m.part);
     lastIndex = m.end;
   }
-  if (lastIndex < text.length) result.push({ type: 'markdown', content: text.substring(lastIndex) });
+  if (lastIndex < processedText.length) result.push({ type: 'markdown', content: processedText.substring(lastIndex) });
 
+  // ── 3. Build final parts: think blocks first, then content, then grouped edits
   const finalParts: MessagePart[] = [];
   const editProposals: EditProposal[] = [];
+
+  // ── 2b. Extract incomplete [EDIT_PROPOSAL] from the final markdown part
+  if (result.length > 0 && result[result.length - 1].type === 'markdown') {
+    const lastPart = result[result.length - 1] as { type: 'markdown', content: string };
+    const incompleteEditRegex = /(?:```\r?\n?)?\[EDIT_PROPOSAL\]\r?\nfile: (.*?)\r?\n([\s\S]*)$/;
+    const match = lastPart.content.match(incompleteEditRegex);
+    if (match) {
+      // Remove the raw edit proposal text from the markdown part
+      lastPart.content = lastPart.content.substring(0, match.index);
+      
+      const filePath = match[1];
+      const remainder = match[2];
+      
+      // Try to extract the "new:" block to show the streaming code
+      let streamingCode = '';
+      const newBlockMatch = remainder.match(/new: \|\r?\n([\s\S]*)$/);
+      if (newBlockMatch) {
+          streamingCode = newBlockMatch[1];
+      }
+
+      // Add a special markdown block that formats the streaming edit
+      result.push({ 
+        type: 'markdown', 
+        content: `**Generating Edit for \`${filePath}\`...**\n\n\`\`\`javascript\n${streamingCode}` 
+      });
+    }
+  }
+
+  // Insert think blocks at the top (they precede the answer)
+  for (const tm of thinkMatches) {
+    finalParts.push(tm.part);
+  }
 
   for (const part of result) {
     if (part.type === 'editProposal') {
@@ -782,13 +1003,21 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 							{message.attachments.map((attachment, idx) => (
 								<div key={idx} className={`msg-attachment ${attachment.type}`}>
 									{attachment.type === 'image' && attachment.imageData ? (
-										<img
-											className="msg-image"
-											src={`data:${attachment.mimeType || 'image/jpeg'};base64,${attachment.imageData}`}
-											alt={attachment.name}
-											title={attachment.name}
-											style={{height:"30px",width:'30px'}}
-										/>
+										<div className="img-thumb-wrap">
+											<img
+												className="msg-image"
+												src={`data:${attachment.mimeType || 'image/jpeg'};base64,${attachment.imageData}`}
+												alt={attachment.name}
+												title={attachment.name}
+												style={{height:"30px",width:'30px'}}
+											/>
+											<div className="img-hover-preview">
+												<img
+													src={`data:${attachment.mimeType || 'image/jpeg'};base64,${attachment.imageData}`}
+													alt={attachment.name}
+												/>
+											</div>
+										</div>
 									) : (
 										<div className="msg-attachment-file">
 											<span className="attachment-icon">📎</span>
@@ -800,6 +1029,7 @@ export const Message: React.FC<MessageProps> = ({ message, logoUri, onCopy, user
 						</div>
 					)}
 					{parts.map((p, idx) => {
+						if (p.type === 'think') return <ThinkBlock key={idx} content={p.content} isStreaming={p.isStreaming} />;
 						if (p.type === 'markdown') return <div key={idx} className="msg-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.content) }} />;
 						if (p.type === 'actionStep') return <ActionStepView key={idx} {...p} onOpenFile={onOpenFile} />;
 						if (p.type === 'command') return <CommandBlock key={idx} {...p} onCopy={onCopy} onFix={onFixCommand} onExecute={(cmd) => {
