@@ -112,7 +112,7 @@ textarea {
 .right-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
 }
 
 .icon-btn {
@@ -214,9 +214,14 @@ textarea {
 .model-trigger {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 8px;
+  gap: 6px;
+  padding: 5px 10px;
   width: 100%;
+  transition: background 0.15s, color 0.15s, transform 0.1s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+  &:active {
+    transform: scale(0.92);
+  }
 
   &.neo {
     #selected-model {
@@ -225,10 +230,6 @@ textarea {
       -webkit-text-fill-color: transparent;
       background-clip: text;
       font-weight: 600;
-    }
-
-    .model-dot {
-      background: var(--accent-gradient);
     }
   }
 }

@@ -6,6 +6,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Tag } from 'antd';
 import { Attachment } from './Message';
+import GeminiLiveIcon from './GeminiLiveIcon';
 import hljs from 'highlight.js';
 
 import {
@@ -877,6 +878,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 					</div>
 
 					<div className="right-controls">
+						<GeminiLiveIcon />
 						<button 
 							className={`console-toggle-btn ${isConsoleVisible ? 'active' : ''}`}
 							onClick={onToggleConsole}
