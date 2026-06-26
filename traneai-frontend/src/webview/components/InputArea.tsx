@@ -20,7 +20,7 @@ import {
 } from './InputAreaHelpers';
 
 interface InputAreaProps {
-	onSendMessage: (text: string, model: string, attachments: Attachment[], pinnedFiles?: string[]) => void;
+	onSendMessage: (text: string, model: string, attachments: Attachment[], pinnedFiles?: string[], mode?: string) => void;
 	onFilesSelected: (files: string[]) => void;
 	currentModel: string;
 	onModelChange: (model: string) => void;

@@ -18,7 +18,8 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
       });
     }
 
-    const { message, model, context, workspaceRoot, pinnedFiles } = req.body as ChatRequest;
+    const { message, model, context, workspaceRoot, pinnedFiles, modeRules } = req.body as ChatRequest;
+    console.log(`[Backend] Received request. Model: ${model}, modeRules length: ${modeRules ? modeRules.length : 'undefined'}`);
     if (!message || typeof message !== 'string') {
       res.status(400).json({ error: 'Message is required' });
       return;
@@ -65,7 +66,8 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
           onToken,
           onStep,
           pinnedFilesArray,
-          images
+          images,
+          modeRules
         );
 
         // Send final signal so the frontend knows streaming is complete
@@ -77,7 +79,7 @@ export async function handleChatMessage(req: Request, res: Response): Promise<vo
 
       res.end();
     } else {
-      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, undefined, pinnedFilesArray, images);
+      const reply = await generateAIResponse(message, history, context, workspaceRoot, model, undefined, pinnedFilesArray, images, modeRules);
       res.json({ message: reply });
     }
 

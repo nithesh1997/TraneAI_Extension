@@ -277,7 +277,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 		this.broadcastTyping(false);
 	}
 
-	public async sendToBackend(message: string, model?: string, attachments?: any[], signal?: AbortSignal): Promise<string> {
+	public async sendToBackend(message: string, model?: string, attachments?: any[], signal?: AbortSignal, modeRules?: string): Promise<string> {
 		const history = this._messages
 			.slice(0, -1)
 			.filter(m => !m.isStreaming && m.text)
@@ -301,7 +301,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 			signal,
 			(text: string, isFinal: boolean) => {
 				this.updateMessageText(aiMsgId, text, !isFinal);
-			}
+			},
+			modeRules
 		);
 	}
 

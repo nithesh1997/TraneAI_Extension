@@ -8,6 +8,7 @@ import { ConsoleService, LogLevel, LogSource } from './ConsoleService';
 import * as vscode_api from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { extractRulesForMode } from '../utils/rulesParser';
 
 export function handleWebviewMessage(provider: ChatViewProvider, data: any, vscode: any) {
     switch (data.command) {
@@ -75,7 +76,11 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
 
             provider.broadcastTyping(true);
             provider.abortController = new AbortController();
-            provider.sendToBackend(enrichedText, data.model, data.attachments, provider.abortController.signal).then(() => {
+
+            const workspaceAppRoot = provider.findWorkspaceAppRoot();
+            const modeRules = extractRulesForMode(workspaceAppRoot, data.model);
+
+            provider.sendToBackend(enrichedText, data.model, data.attachments, provider.abortController.signal, modeRules).then(() => {
                 provider.broadcastTyping(false);
                 provider.saveCurrentSession();
                 provider.broadcastHistoryList();

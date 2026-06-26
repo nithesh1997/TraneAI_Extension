@@ -270,7 +270,8 @@ export async function generateAIResponseStreaming(
   onToken: (token: string) => void,
   onStep: (step: string) => void,
   pinnedFiles: string[] = [],
-  images?: { base64: string; mimeType: string }[]
+  images?: { base64: string; mimeType: string }[],
+  modeRules?: string
 ): Promise<void> {
   const client = new AzureOpenAI({
     apiKey: process.env.AZURE_OPENAI_API_KEY,
@@ -346,10 +347,15 @@ export async function generateAIResponseStreaming(
       ]
     : message;
 
+  const baseSystemPrompt = getEnhancedSystemPrompt(workspaceRoot, indexSummary, intent, contextSnippets);
+  const finalSystemPrompt = modeRules 
+    ? `${baseSystemPrompt}\n\n## strict mode rules\n${modeRules}\n\n`
+    : baseSystemPrompt;
+
   const messages: any[] = [
     {
       role: 'system',
-      content: getEnhancedSystemPrompt(workspaceRoot, indexSummary, intent, contextSnippets) + pinnedContext,
+      content: finalSystemPrompt + pinnedContext,
     },
     ...(history || []),
     { role: 'user', content: userContent }
@@ -501,7 +507,8 @@ export async function generateAIResponse(
   model?: string,
   onStep?: (step: string) => void,
   pinnedFiles: string[] = [],
-  images?: { base64: string; mimeType: string }[]
+  images?: { base64: string; mimeType: string }[],
+  modeRules?: string
 ): Promise<string> {
   let fullContent = '';
   const steps: string[] = [];
@@ -515,7 +522,8 @@ export async function generateAIResponse(
     (token) => { fullContent += token; },
     (step) => { steps.push(step); if (onStep) onStep(step); },
     pinnedFiles,
-    images
+    images,
+    modeRules
   );
 
   // Prepend steps to the content

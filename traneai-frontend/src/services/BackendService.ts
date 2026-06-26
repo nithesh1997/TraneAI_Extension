@@ -17,7 +17,8 @@ export class BackendService {
         model: string | undefined,
         attachments: any[] | undefined,
         signal: AbortSignal | undefined,
-        onUpdate: (text: string, isFinal: boolean) => void
+        onUpdate: (text: string, isFinal: boolean) => void,
+        modeRules?: string
     ): Promise<string> {
         try {
             const formData = new FormData();
@@ -30,6 +31,10 @@ export class BackendService {
             
             if (workspaceRoot) {
                 formData.append('workspaceRoot', workspaceRoot);
+            }
+
+            if (modeRules) {
+                formData.append('modeRules', modeRules);
             }
 
             const imageAttachments = attachments?.filter((a: any) => a.type === 'image' && a.imageData) ?? [];
