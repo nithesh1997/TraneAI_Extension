@@ -6,9 +6,10 @@ interface AppHeaderProps {
 	onNewChat: () => void;
 	onClearChat: () => void;
 	onShowHistory: () => void;
+	onShowAdmin: () => void;
 }
 
-export const AppHeader: React.FC<AppHeaderProps> = ({ logoUri, onNewChat, onClearChat, onShowHistory }) => {
+export const AppHeader: React.FC<AppHeaderProps> = ({ logoUri, onNewChat, onClearChat, onShowHistory, onShowAdmin }) => {
 	const { logout } = useAuth();
 
 	return (
@@ -21,6 +22,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ logoUri, onNewChat, onClea
 					<path d="M8 5.5V8l2 1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
 				</svg>
 				<div>All charts</div>
+			</button>
+			<button className="hdr-btn" title="Admin Access" onClick={onShowAdmin} style={{ marginLeft: '8px' }}>
+				<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+					<path d="M8 3.5v9M3.5 8h9M2 2h12v12H2z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+				</svg>
+				<div style={{ marginLeft: '4px' }}>Admin Access</div>
 			</button>
 			<button className="hdr-btn" title="New Chat" onClick={onNewChat}>
 				<svg width="14" height="14" viewBox="0 0 16 16" fill="none">

@@ -9,18 +9,123 @@ import * as vscode_api from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { extractRulesForMode } from '../utils/rulesParser';
+import { BackendService } from './BackendService';
 
 export function handleWebviewMessage(provider: ChatViewProvider, data: any, vscode: any) {
     switch (data.command) {
-        case 'login':
-            const prevEmail = provider.userEmail;
-            provider.userEmail = data.email || '';
-            provider.sessionManager.ensureTraneAIDir();
-            if (prevEmail && prevEmail !== provider.userEmail) {
-                provider.createNewSession();
+        case 'openAdminWeb': {
+            const workspaceRoot = provider.findWorkspaceAppRoot();
+            let projectName = 'unknown';
+            if (workspaceRoot) {
+                projectName = path.basename(workspaceRoot);
+                const packageJsonPath = path.join(workspaceRoot, 'package.json');
+                if (fs.existsSync(packageJsonPath)) {
+                    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+                    if (packageJson.name) {
+                        projectName = packageJson.name;
+                    }
+                }
             }
-            provider.broadcastHistoryList();
+            // Launch the external web app served by the backend
+            vscode_api.env.openExternal(vscode_api.Uri.parse(`http://localhost:5000/api/workspace/admin?projectName=${projectName}`));
             break;
+        }
+        case 'updateProjectConfig': {
+            try {
+                provider.sessionManager.saveProjectConfig(data.config);
+            } catch (err) {
+                console.error('Failed to save project config locally:', err);
+            }
+            break;
+        }
+        case 'login': {
+            const { email, password } = data;
+            provider.postMessageToWebview({ type: 'authLoading', value: true });
+            BackendService.login(email, password).then(async result => {
+                if (result.success) {
+                    const prevEmail = provider.userEmail;
+                    provider.userEmail = email;
+                    provider.sessionManager.ensureTraneAIDir();
+                    if (prevEmail && prevEmail !== provider.userEmail) {
+                        provider.createNewSession();
+                    }
+
+                    // Upgrade Feature Flow: Project Configuration
+                    try {
+                        const workspaceRoot = provider.findWorkspaceAppRoot();
+                        if (workspaceRoot) {
+                            let projectName = path.basename(workspaceRoot); // Default to folder name
+                            const packageJsonPath = path.join(workspaceRoot, 'package.json');
+                            if (fs.existsSync(packageJsonPath)) {
+                                const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+                                if (packageJson.name) {
+                                    projectName = packageJson.name;
+                                }
+                            }
+                            
+                            const configResult = await BackendService.fetchProjectConfig(projectName);
+                            if (configResult.success && configResult.data) {
+                                provider.sessionManager.saveProjectConfig(configResult.data);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Error fetching project config during login:', err);
+                    }
+
+                    provider.postMessageToWebview({ type: 'authLoading', value: false });
+                    provider.postMessageToWebview({ type: 'authResult', success: true, email, token: result.token });
+                    provider.broadcastHistoryList();
+                } else {
+                    provider.postMessageToWebview({ type: 'authLoading', value: false });
+                    provider.postMessageToWebview({ type: 'authResult', success: false, error: result.error });
+                }
+            });
+            break;
+        }
+        case 'signup': {
+            const { email, password } = data;
+            provider.postMessageToWebview({ type: 'authLoading', value: true });
+            BackendService.signup(email, password).then(async result => {
+                if (result.success) {
+                    const prevEmail = provider.userEmail;
+                    provider.userEmail = email;
+                    provider.sessionManager.ensureTraneAIDir();
+                    if (prevEmail && prevEmail !== provider.userEmail) {
+                        provider.createNewSession();
+                    }
+
+                    // Upgrade Feature Flow: Project Configuration
+                    try {
+                        const workspaceRoot = provider.findWorkspaceAppRoot();
+                        if (workspaceRoot) {
+                            let projectName = path.basename(workspaceRoot); // Default to folder name
+                            const packageJsonPath = path.join(workspaceRoot, 'package.json');
+                            if (fs.existsSync(packageJsonPath)) {
+                                const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+                                if (packageJson.name) {
+                                    projectName = packageJson.name;
+                                }
+                            }
+                            
+                            const configResult = await BackendService.fetchProjectConfig(projectName);
+                            if (configResult.success && configResult.data) {
+                                provider.sessionManager.saveProjectConfig(configResult.data);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Error fetching project config during signup:', err);
+                    }
+
+                    provider.postMessageToWebview({ type: 'authLoading', value: false });
+                    provider.postMessageToWebview({ type: 'authResult', success: true, email, token: result.token });
+                    provider.broadcastHistoryList();
+                } else {
+                    provider.postMessageToWebview({ type: 'authLoading', value: false });
+                    provider.postMessageToWebview({ type: 'authResult', success: false, error: result.error });
+                }
+            });
+            break;
+        }
         case 'logout':
             provider.saveCurrentSession(false);
             provider.userEmail = '';

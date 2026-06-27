@@ -15,7 +15,7 @@ interface LoginPageProps {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ logoUri, onSwitchToSignup }) => {
-	const { login } = useAuth();
+	const { login, isLoading } = useAuth();
 	const [form] = Form.useForm<LoginValues>();
 	const [isScanningFace, setIsScanningFace] = useState(false);
 
@@ -75,6 +75,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ logoUri, onSwitchToSignup 
 								htmlType="submit"
 								className="login-btn"
 								block
+								loading={isLoading}
 							>
 								Sign In
 							</Button>

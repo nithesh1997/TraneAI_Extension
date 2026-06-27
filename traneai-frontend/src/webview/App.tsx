@@ -284,6 +284,16 @@ const ChatApp: React.FC = () => {
 		return <RedirectScreen logoUri={LOGO_URI} onRestore={handleRestore} />;
 	}
 
+	if (!workspaceOpen) {
+		return (
+			<WorkspaceEmptyState 
+				logoUri={LOGO_URI} 
+				onOpenFolder={handleOpenFolder} 
+				onCloneRepository={handleCloneRepository} 
+			/>
+		);
+	}
+
 	return (
 		<div className="main-content">
 			<AppHeader
@@ -291,6 +301,7 @@ const ChatApp: React.FC = () => {
 				onNewChat={handleNewChat}
 				onClearChat={handleClearChat}
 				onShowHistory={handleShowHistory}
+				onShowAdmin={() => vscode.postMessage({ command: 'openAdminWeb' })}
 			/>
 			<div id="chat-container" className="chat-container">
 				<HeroSection logoUri={LOGO_URI} onQuickSend={handleQuickSend} visible={messages.length === 0} currentModel={currentModel} />

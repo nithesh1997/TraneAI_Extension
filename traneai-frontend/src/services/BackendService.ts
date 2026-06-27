@@ -134,4 +134,72 @@ export class BackendService {
             return errorMsg;
         }
     }
+
+    public static async login(email: string, password: string):Promise<{ success: boolean; token?: string; user?: any; error?: string }> {
+        try {
+            const response = await fetch('http://localhost:5000/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return { success: false, error: data.error || 'Login failed' };
+            }
+            return data;
+        } catch (error: any) {
+            return { success: false, error: error.message || 'Connection failed' };
+        }
+    }
+
+    public static async signup(email: string, password: string):Promise<{ success: boolean; token?: string; user?: any; error?: string }> {
+        try {
+            const response = await fetch('http://localhost:5000/api/auth/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return { success: false, error: data.error || 'Signup failed' };
+            }
+            return data;
+        } catch (error: any) {
+            return { success: false, error: error.message || 'Connection failed' };
+        }
+    }
+
+    public static async fetchProjectConfig(projectName: string): Promise<{ success: boolean, data?: any, error?: string }> {
+        try {
+            const response = await fetch('http://localhost:5000/api/workspace/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectName })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return { success: false, error: data.error || 'Failed to fetch config' };
+            }
+            return { success: true, data };
+        } catch (error: any) {
+            return { success: false, error: error.message || 'Connection failed' };
+        }
+    }
+
+    public static async updateProjectConfig(projectName: string, project: any, roles: any): Promise<{ success: boolean, data?: any, error?: string }> {
+        try {
+            const response = await fetch('http://localhost:5000/api/workspace/config', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectName, project, roles })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return { success: false, error: data.error || 'Failed to update config' };
+            }
+            return { success: true, data };
+        } catch (error: any) {
+            return { success: false, error: error.message || 'Connection failed' };
+        }
+    }
 }

@@ -1,5 +1,5 @@
 import express from 'express';
-import { getWorkspaceFiles, getWorkspaceFolders, getWorkspaceBranches } from '../controllers/workspaceController.js';
+import { getWorkspaceFiles, getWorkspaceFolders, getWorkspaceBranches, getProjectConfig, updateProjectConfig, serveAdminPortalClient } from '../controllers/workspaceController.js';
 
 const router = express.Router();
 
@@ -32,5 +32,35 @@ router.get('/folders', getWorkspaceFolders);
  *       - Workspace
  */
 router.get('/branches', getWorkspaceBranches);
+
+/**
+ * @swagger
+ * /api/workspace/config:
+ *   post:
+ *     summary: Get project configuration by package.json name
+ *     tags:
+ *       - Workspace
+ */
+router.post('/config', getProjectConfig);
+
+/**
+ * @swagger
+ * /api/workspace/config:
+ *   put:
+ *     summary: Update project configuration
+ *     tags:
+ *       - Workspace
+ */
+router.put('/config', updateProjectConfig);
+
+/**
+ * @swagger
+ * /api/workspace/admin:
+ *   get:
+ *     summary: Serve the Admin Portal UI
+ *     tags:
+ *       - Workspace
+ */
+router.get('/admin', serveAdminPortalClient);
 
 export default router;

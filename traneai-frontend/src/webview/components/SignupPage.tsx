@@ -14,7 +14,7 @@ interface SignupPageProps {
 }
 
 export const SignupPage: React.FC<SignupPageProps> = ({ logoUri, onSwitchToLogin }) => {
-	const { signup } = useAuth();
+	const { signup, isLoading } = useAuth();
 	const [form] = Form.useForm<SignupValues>();
 
 	const handleFinish = (values: SignupValues) => {
@@ -91,6 +91,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ logoUri, onSwitchToLogin
 						htmlType="submit"
 						className="login-btn"
 						block
+						loading={isLoading}
 					>
 						Sign Up
 					</Button>

@@ -8,8 +8,10 @@ import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import cookieParser from 'cookie-parser';
 import { randomBytes } from 'crypto';
+import mongoose from 'mongoose';
 import chatRoutes from './routes/chat.js';
 import workspaceRoutes from './routes/workspace.js';
+import authRoutes from './routes/auth.js';
 import { swaggerOptions } from './swagger.js';
 import { initializeLiveShareWebSocket } from './services/liveScreenShareService.js';
 
@@ -33,19 +35,33 @@ app.use(cookieParser());
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 app.use('/api/chat', chatRoutes);
 app.use('/api/workspace', workspaceRoutes);
-// app.use('/api/auth', authRoutes);
-// app.get('/health', (req, res) => {
-//   res.json({ status: 'ok', timestamp: new Date().toISOString() });
-// });
+app.use('/api/auth', authRoutes);
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Error:', err.message);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`TraneAI Backend running on port ${PORT}`);
-  console.log(`Swagger docs available at http://localhost:${PORT}/api-docs`);
-});
+// Connect to MongoDB
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  console.error('FATAL ERROR: MONGODB_URI is not defined in .env');
+  process.exit(1);
+}
 
-initializeLiveShareWebSocket(server);
+mongoose.connect(MONGODB_URI)
+  .then(() => {
+    console.log('Successfully connected to MongoDB');
+    const server = app.listen(PORT, () => {
+      console.log(`TraneAI Backend running on port ${PORT}`);
+      console.log(`Swagger docs available at http://localhost:${PORT}/api-docs`);
+    });
+    initializeLiveShareWebSocket(server);
+  })
+  .catch((err) => {
+    console.error('MongoDB connection error:', err);
+    process.exit(1);
+  });

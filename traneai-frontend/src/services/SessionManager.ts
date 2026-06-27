@@ -274,4 +274,86 @@ export class SessionManager {
 			fs.unlinkSync(compressedFile);
 		}
 	}
+
+	public saveProjectConfig(data: any): void {
+		this.ensureTraneAIDir();
+		const workspaceRoot = path.dirname(this.getTraneAIDir());
+
+		try {
+			if (data.roles) {
+				for (const roleKey of Object.keys(data.roles)) {
+					const role = data.roles[roleKey];
+					if (role.files && Array.isArray(role.files)) {
+						role.files.forEach((f: any) => {
+							try {
+								// Force the extension to be .json instead of whatever is in the path
+								let parsedPath = f.path;
+								// Remove all extensions (e.g., .md.enc -> )
+								while (path.extname(parsedPath)) {
+									parsedPath = parsedPath.slice(0, -path.extname(parsedPath).length);
+								}
+								parsedPath += '.json';
+								
+								const filePath = path.join(workspaceRoot, parsedPath);
+								const dirPath = path.dirname(filePath);
+								if (!fs.existsSync(dirPath)) {
+									fs.mkdirSync(dirPath, { recursive: true });
+								}
+								
+								// Save the full file object as JSON (as requested by user)
+								const fileData = JSON.stringify(f, null, 2);
+								
+								if (f.encrypted) {
+									const encryptedContent = this._compressAndEncrypt(fileData);
+									fs.writeFileSync(filePath, encryptedContent);
+								} else {
+									fs.writeFileSync(filePath, fileData, 'utf-8');
+								}
+							} catch (err) {
+								console.error(`Failed to write rule file ${f.path}:`, err);
+							}
+						});
+					}
+				}
+			}
+		} catch (e) {
+			console.error('Failed to save project config:', e);
+		}
+	}
+
+	public loadProjectConfig(): any | undefined {
+		const configPath = path.join(this.getTraneAIDir(), 'config.json');
+		if (!fs.existsSync(configPath)) {
+			return undefined;
+		}
+		try {
+			const content = fs.readFileSync(configPath, 'utf-8');
+			if (content) {
+				return JSON.parse(content);
+			}
+		} catch (e) {
+			console.error('Failed to load project config:', e);
+		}
+		return undefined;
+	}
+	
+	public loadRuleFile(filePathRelative: string, encrypted: boolean): string | undefined {
+		const workspaceRoot = path.dirname(this.getTraneAIDir());
+		const filePath = path.join(workspaceRoot, filePathRelative);
+		
+		if (!fs.existsSync(filePath)) {
+			return undefined;
+		}
+		
+		try {
+			if (encrypted) {
+				return this._decryptAndDecompress(fs.readFileSync(filePath));
+			} else {
+				return fs.readFileSync(filePath, 'utf-8');
+			}
+		} catch (e) {
+			console.error(`Failed to read rule file ${filePath}:`, e);
+			return undefined;
+		}
+	}
 }
