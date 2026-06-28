@@ -27,7 +27,9 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                 }
             }
             // Launch the external web app served by the backend
-            vscode_api.env.openExternal(vscode_api.Uri.parse(`http://localhost:5000/api/workspace/admin?projectName=${projectName}`));
+            const rootParam = workspaceRoot ? `&rootPath=${encodeURIComponent(workspaceRoot)}` : '';
+            const midParam = vscode_api.env.machineId ? `&mid=${vscode_api.env.machineId}` : '';
+            vscode_api.env.openExternal(vscode_api.Uri.parse(`http://localhost:5000/api/workspace/admin?projectName=${projectName}${rootParam}${midParam}`));
             break;
         }
         case 'updateProjectConfig': {
@@ -35,6 +37,35 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                 provider.sessionManager.saveProjectConfig(data.config);
             } catch (err) {
                 console.error('Failed to save project config locally:', err);
+            }
+            break;
+        }
+        case 'syncAuth': {
+            const { email } = data;
+            provider.userEmail = email;
+            provider.sessionManager.ensureTraneAIDir();
+            
+            // Upgrade Feature Flow: Project Configuration (same as login)
+            try {
+                const workspaceRoot = provider.findWorkspaceAppRoot();
+                if (workspaceRoot) {
+                    let projectName = path.basename(workspaceRoot);
+                    const packageJsonPath = path.join(workspaceRoot, 'package.json');
+                    if (fs.existsSync(packageJsonPath)) {
+                        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+                        if (packageJson.name) {
+                            projectName = packageJson.name;
+                        }
+                    }
+                    
+                    BackendService.fetchProjectConfig(projectName).then(configResult => {
+                        if (configResult.success && configResult.data) {
+                            provider.sessionManager.saveProjectConfig(configResult.data);
+                        }
+                    }).catch(err => console.error('Error fetching project config during syncAuth:', err));
+                }
+            } catch (err) {
+                console.error('Error during syncAuth config load:', err);
             }
             break;
         }

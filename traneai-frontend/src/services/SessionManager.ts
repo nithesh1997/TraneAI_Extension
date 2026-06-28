@@ -49,7 +49,7 @@ export class SessionManager {
 		return Buffer.concat([iv, encrypted]);
 	}
 
-	private _decryptAndDecompress(buffer: Buffer): string {
+	public _decryptAndDecompress(buffer: Buffer): string {
 		try {
 			const iv = buffer.subarray(0, 16);
 			const encryptedData = buffer.subarray(16);
@@ -277,45 +277,9 @@ export class SessionManager {
 
 	public saveProjectConfig(data: any): void {
 		this.ensureTraneAIDir();
-		const workspaceRoot = path.dirname(this.getTraneAIDir());
-
 		try {
-			if (data.roles) {
-				for (const roleKey of Object.keys(data.roles)) {
-					const role = data.roles[roleKey];
-					if (role.files && Array.isArray(role.files)) {
-						role.files.forEach((f: any) => {
-							try {
-								// Force the extension to be .json instead of whatever is in the path
-								let parsedPath = f.path;
-								// Remove all extensions (e.g., .md.enc -> )
-								while (path.extname(parsedPath)) {
-									parsedPath = parsedPath.slice(0, -path.extname(parsedPath).length);
-								}
-								parsedPath += '.json';
-								
-								const filePath = path.join(workspaceRoot, parsedPath);
-								const dirPath = path.dirname(filePath);
-								if (!fs.existsSync(dirPath)) {
-									fs.mkdirSync(dirPath, { recursive: true });
-								}
-								
-								// Save the full file object as JSON (as requested by user)
-								const fileData = JSON.stringify(f, null, 2);
-								
-								if (f.encrypted) {
-									const encryptedContent = this._compressAndEncrypt(fileData);
-									fs.writeFileSync(filePath, encryptedContent);
-								} else {
-									fs.writeFileSync(filePath, fileData, 'utf-8');
-								}
-							} catch (err) {
-								console.error(`Failed to write rule file ${f.path}:`, err);
-							}
-						});
-					}
-				}
-			}
+			const configPath = path.join(this.getTraneAIDir(), 'config.json');
+			fs.writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
 		} catch (e) {
 			console.error('Failed to save project config:', e);
 		}

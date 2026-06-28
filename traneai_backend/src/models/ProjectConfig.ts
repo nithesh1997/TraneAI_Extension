@@ -10,7 +10,6 @@ export interface IProjectConfigFile {
   updatedAt: string;
   checksum: string;
   encrypted: boolean;
-  content: string; // The actual markdown content
 }
 
 export interface IProjectConfigRole {
@@ -39,8 +38,7 @@ const fileSchema = new Schema<IProjectConfigFile>({
   createdAt: { type: String, required: true },
   updatedAt: { type: String, required: true },
   checksum: { type: String, required: true },
-  encrypted: { type: Boolean, required: true },
-  content: { type: String, required: true },
+  encrypted: { type: Boolean, required: true }
 }, { _id: false });
 
 const roleSchema = new Schema<IProjectConfigRole>({

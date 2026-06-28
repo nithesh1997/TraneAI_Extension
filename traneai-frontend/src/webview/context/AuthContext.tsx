@@ -38,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 		secureRetrieve<StoredAuth>(AUTH_STORAGE_KEY).then(stored => {
 			if (stored?.isAuthenticated && stored?.email) {
 				setAuthState(prev => ({ ...prev, isAuthenticated: true, email: stored.email }));
-				vscode.postMessage({ command: 'login', email: stored.email }); // Sync with extension host
+				vscode.postMessage({ command: 'syncAuth', email: stored.email }); // Sync with extension host
 			}
 		});
 	}, []);

@@ -2,78 +2,43 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SessionManager } from '../services/SessionManager';
 
-// Helper function to recursively find all files in a directory
-function getAllFiles(dirPath: string, arrayOfFiles: string[] = []): string[] {
-    if (!fs.existsSync(dirPath)) {
-        return arrayOfFiles;
-    }
-    const files = fs.readdirSync(dirPath);
-    files.forEach((file) => {
-        const fullPath = path.join(dirPath, file);
-        if (fs.statSync(fullPath).isDirectory()) {
-            arrayOfFiles = getAllFiles(fullPath, arrayOfFiles);
-        } else {
-            arrayOfFiles.push(fullPath);
-        }
-    });
-    return arrayOfFiles;
-}
-
 export function extractRulesForMode(workspaceRoot: string | undefined, mode: string): string | undefined {
     if (!workspaceRoot || !mode || mode === 'None') {
         return undefined;
     }
 
     const sessionManager = new SessionManager();
-    const normalizedMode = mode.toLowerCase().replace(/-/g, ' ');
-    const folderMode = normalizedMode.replace(/\s+/g, '-');
+    const config = sessionManager.loadProjectConfig();
     
-    // Try to find the directory for this mode
-    // We assume the folder name matches the mode (e.g., 'developer', 'qa')
-    const modeDir = path.join(workspaceRoot, '.traneAI', folderMode);
-    
-    if (fs.existsSync(modeDir)) {
-        console.log(`[TraneAI Rules] Found role folder '${modeDir}' for mode '${mode}'.`);
+    if (config && config.roles) {
+        // Find matching role key (case-insensitive, handling trailing 's' like Developer vs Developers)
+        const matchedRoleKey = Object.keys(config.roles).find(k => {
+            const kl = k.toLowerCase().replace(/-/g, ' ');
+            const ml = mode.toLowerCase().replace(/-/g, ' ');
+            return kl === ml || kl + 's' === ml || kl === ml + 's';
+        });
         
-        let combinedRules = '';
-        const allFiles = getAllFiles(modeDir);
-        
-        for (const filePath of allFiles) {
-            try {
-                // Since files could be encrypted or not, we can't tell just from the extension
-                // The filename might end with .enc or .json or .md.enc
-                const isEncrypted = filePath.endsWith('.enc');
+        if (matchedRoleKey) {
+            const roleData = config.roles[matchedRoleKey];
+            if (roleData.enabled !== false && roleData.files && Array.isArray(roleData.files)) {
+                console.log(`[TraneAI Rules] Found role data in config.json for mode '${mode}'.`);
+                let combinedRules = '';
                 
-                // Read the file content
-                let fileContent = '';
-                if (isEncrypted) {
-                    fileContent = sessionManager._decryptAndDecompress(fs.readFileSync(filePath)) || '';
-                } else {
-                    fileContent = fs.readFileSync(filePath, 'utf8');
-                }
-                
-                if (fileContent) {
-                    // Try parsing as JSON since we now save the full JSON object in the file
-                    try {
-                        const jsonObj = JSON.parse(fileContent);
-                        if (jsonObj && jsonObj.content) {
-                            combinedRules += `\n\n--- [${jsonObj.name || path.basename(filePath)}] ---\n\n${jsonObj.content}`;
-                        } else {
-                            // If it's a JSON object but has no content field, ignore or append whole?
-                            // Let's assume content is the actual markdown
+                for (const file of roleData.files) {
+                    if (file.content) {
+                        combinedRules += `\n\n--- [${file.name || file.id || 'Rule'}] ---\n\n${file.content}`;
+                    } else if (file.path) {
+                        const fileContent = sessionManager.loadRuleFile(file.path, file.encrypted);
+                        if (fileContent) {
+                            combinedRules += `\n\n--- [${file.name || file.id || 'Rule'}] ---\n\n${fileContent}`;
                         }
-                    } catch (jsonErr) {
-                        // If it's not JSON, fallback to appending raw content
-                        combinedRules += `\n\n--- [${path.basename(filePath)}] ---\n\n${fileContent}`;
                     }
                 }
-            } catch (err) {
-                console.error(`Failed to read/decrypt rule file ${filePath}:`, err);
+                
+                if (combinedRules.trim().length > 0) {
+                    return combinedRules.trim();
+                }
             }
-        }
-        
-        if (combinedRules.trim().length > 0) {
-            return combinedRules.trim();
         }
     }
 

@@ -1,5 +1,5 @@
 import express from 'express';
-import { getWorkspaceFiles, getWorkspaceFolders, getWorkspaceBranches, getProjectConfig, updateProjectConfig, serveAdminPortalClient } from '../controllers/workspaceController.js';
+import { getWorkspaceFiles, getWorkspaceFolders, getWorkspaceBranches, getProjectConfig, updateProjectConfig, serveAdminPortalClient, uploadWorkspaceFile, getWorkspaceFileContent } from '../controllers/workspaceController.js';
 
 const router = express.Router();
 
@@ -52,6 +52,26 @@ router.post('/config', getProjectConfig);
  *       - Workspace
  */
 router.put('/config', updateProjectConfig);
+
+/**
+ * @swagger
+ * /api/workspace/upload-file:
+ *   post:
+ *     summary: Upload and encrypt a workspace file
+ *     tags:
+ *       - Workspace
+ */
+router.post('/upload-file', uploadWorkspaceFile);
+
+/**
+ * @swagger
+ * /api/workspace/file-content:
+ *   post:
+ *     summary: Get decrypted workspace file content
+ *     tags:
+ *       - Workspace
+ */
+router.post('/file-content', getWorkspaceFileContent);
 
 /**
  * @swagger
