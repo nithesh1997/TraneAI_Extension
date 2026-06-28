@@ -29,6 +29,34 @@ async function init() {
     contextMenu.classList.remove('show');
   });
 
+  // Breadcrumb delegation
+  breadcrumb.addEventListener('click', (e) => {
+    const item = e.target.closest('.breadcrumb-item');
+    if (!item) return;
+    const pathStr = item.getAttribute('data-path');
+    if (pathStr) navigateToPath(JSON.parse(pathStr));
+  });
+
+  // Context Menu delegation
+  contextMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('.context-item');
+    if (!item || item.classList.contains('disabled')) return;
+    const action = item.getAttribute('data-action');
+    if (action === 'open') handleGridDblClick({target: document.querySelector('.grid-item.selected')});
+    else if (action === 'edit') openEditor();
+    else if (action === 'deleteFolder') deleteSelectedFolder();
+    else if (action === 'deleteFile') deleteSelectedFile();
+  });
+
+  // Sidebar delegation
+  sidebarContent.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const action = btn.getAttribute('data-action');
+    if (action === 'deleteSidebarFile') deleteSelectedFile();
+    else if (action === 'saveSidebarDetails') window.saveSidebarDetails();
+  });
+
   searchInput.addEventListener('input', () => renderExplorer());
   
   document.getElementById('editorBackBtn').addEventListener('click', closeEditor);
@@ -131,12 +159,12 @@ function buildVfs() {
 
 // Rendering
 function renderBreadcrumb() {
-  let html = `<div class="breadcrumb-item" onclick="navigateToPath([])">Home</div>`;
+  let html = `<div class="breadcrumb-item" data-path="[]">Home</div>`;
   let pathBuilder = [];
   for (let p of currentPath) {
     pathBuilder.push(p);
     const pbStr = JSON.stringify(pathBuilder).replace(/"/g, '&quot;');
-    html += `<span class="breadcrumb-separator">/</span><div class="breadcrumb-item" onclick="navigateToPath(${pbStr})">${escapeHtml(p)}</div>`;
+    html += `<span class="breadcrumb-separator">/</span><div class="breadcrumb-item" data-path="${pbStr}">${escapeHtml(p)}</div>`;
   }
   breadcrumb.innerHTML = html;
 }
@@ -259,15 +287,15 @@ function handleGridContextMenu(e) {
   let html = '';
   if (type === 'dir') {
     html = `
-      <div class="context-item" onclick="handleGridDblClick({target: document.querySelector('.grid-item.selected')})">Open</div>
+      <div class="context-item" data-action="open">Open</div>
       <div class="context-divider"></div>
-      <div class="context-item danger" onclick="deleteSelectedFolder()">Delete</div>
+      <div class="context-item danger" data-action="deleteFolder">Delete</div>
     `;
   } else {
     html = `
-      <div class="context-item" onclick="openEditor()">Edit</div>
+      <div class="context-item" data-action="edit">Edit</div>
       <div class="context-divider"></div>
-      <div class="context-item danger" onclick="deleteSelectedFile()">Delete</div>
+      <div class="context-item danger" data-action="deleteFile">Delete</div>
     `;
   }
   
@@ -327,8 +355,8 @@ function renderSidebar() {
       </div>
       
       <div style="display:flex; gap:8px; margin-top:24px;">
-        <button class="btn btn-dark danger" style="flex:1;" onclick="deleteSelectedFile()">Delete</button>
-        <button class="btn btn-blue" style="flex:1;" onclick="saveSidebarDetails()">Save Details</button>
+        <button class="btn btn-dark danger" style="flex:1;" data-action="deleteSidebarFile">Delete</button>
+        <button class="btn btn-blue" style="flex:1;" data-action="saveSidebarDetails">Save Details</button>
       </div>
     </div>
   `;
@@ -348,6 +376,18 @@ window.deleteSelectedFile = async () => {
   if (!selectedItem || selectedItem.type !== 'file') return;
   if (confirm('Are you sure you want to delete this file?')) {
     const { roleKey, fileIndex } = selectedItem.node;
+    const file = configData.roles[roleKey].files[fileIndex];
+    
+    // Delete physical file first
+    try {
+      await fetch('/api/workspace/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rootPath, filePath: file.path })
+      });
+    } catch (e) {
+      console.error('Failed to delete physical file', e);
+    }
     configData.roles[roleKey].files.splice(fileIndex, 1);
     selectedItem = null;
     if (await saveConfig()) renderExplorer();
@@ -397,6 +437,15 @@ window.openEditor = async () => {
 
   if (editorInstance) {
     editorInstance.setValue(contentToEdit);
+    const model = editorInstance.getModel();
+    if (model) {
+      const ext = file.name ? file.name.split('.').pop().toLowerCase() : '';
+      let lang = 'plaintext';
+      if (ext === 'json') lang = 'json';
+      else if (ext === 'md') lang = 'markdown';
+      else if (ext === 'js' || ext === 'ts') lang = 'javascript';
+      monaco.editor.setModelLanguage(model, lang);
+    }
   } else {
     // If Monaco failed to load
     document.getElementById('monacoContainer').innerHTML = '<textarea id="fallbackEditor" style="width:100%;height:100%;background:#1e1e1e;color:#fff;border:none;padding:20px;font-family:monospace;"></textarea>';
