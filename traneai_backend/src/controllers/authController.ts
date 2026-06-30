@@ -35,7 +35,7 @@ export async function handleSignup(req: Request, res: Response): Promise<void> {
     await newUser.save();
 
     const token = jwt.sign(
-      { id: newUser._id, email: newUser.email, name: newUser.name },
+      { id: newUser._id, email: newUser.email, name: newUser.name, role: newUser.role },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -46,7 +46,8 @@ export async function handleSignup(req: Request, res: Response): Promise<void> {
       user: {
         id: newUser._id,
         email: newUser.email,
-        name: newUser.name
+        name: newUser.name,
+        role: newUser.role
       }
     });
   } catch (error) {
@@ -77,7 +78,7 @@ export async function handleLogin(req: Request, res: Response): Promise<void> {
     }
 
     const token = jwt.sign(
-      { id: user._id, email: user.email, name: user.name },
+      { id: user._id, email: user.email, name: user.name, role: user.role },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -88,7 +89,8 @@ export async function handleLogin(req: Request, res: Response): Promise<void> {
       user: {
         id: user._id,
         email: user.email,
-        name: user.name
+        name: user.name,
+        role: user.role
       }
     });
   } catch (error) {
@@ -121,7 +123,8 @@ export async function handleGetCurrentUser(req: Request, res: Response): Promise
       user: {
         id: dbUser._id,
         email: dbUser.email,
-        name: dbUser.name
+        name: dbUser.name,
+        role: dbUser.role
       }
     });
   } catch (error) {

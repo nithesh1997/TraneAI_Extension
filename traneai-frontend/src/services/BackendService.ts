@@ -202,4 +202,48 @@ export class BackendService {
             return { success: false, error: error.message || 'Connection failed' };
         }
     }
+
+    public static async syncModeFilesLocally(workspaceRoot: string, mode: string, config: any, machineId: string): Promise<void> {
+        if (!config || !config.roles) return;
+        const matchedRoleKey = Object.keys(config.roles).find(k => {
+            const kl = k.toLowerCase().replace(/-/g, ' ');
+            const ml = mode.toLowerCase().replace(/-/g, ' ');
+            return kl === ml || kl + 's' === ml || kl === ml + 's';
+        });
+        if (!matchedRoleKey) return;
+        
+        const roleData = config.roles[matchedRoleKey];
+        if (!roleData.files || !Array.isArray(roleData.files)) return;
+
+        const fs = require('fs');
+        const path = require('path');
+
+        for (const file of roleData.files) {
+            if (file.name === '.keep' || file.fileName === '.keep') continue;
+            
+            if (file.path) {
+                try {
+                    const response = await fetch('http://localhost:5000/api/workspace/file-content', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rootPath: workspaceRoot, mid: machineId, filePath: file.path, isEncrypted: file.encrypted })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success && data.content !== undefined) {
+                            const fullPath = path.join(workspaceRoot, file.path);
+                            const dir = path.dirname(fullPath);
+                            if (!fs.existsSync(dir)) {
+                                fs.mkdirSync(dir, { recursive: true });
+                            }
+                            fs.writeFileSync(fullPath, data.content, 'utf-8');
+                        }
+                    }
+                } catch (err) {
+                    console.error('Failed to sync mode file:', file.path, err);
+                }
+            }
+        }
+    }
 }

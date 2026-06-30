@@ -25,6 +25,8 @@ export function extractRulesForMode(workspaceRoot: string | undefined, mode: str
                 let combinedRules = '';
                 
                 for (const file of roleData.files) {
+                    if (file.name === '.keep' || file.fileName === '.keep') continue;
+                    
                     if (file.content) {
                         combinedRules += `\n\n--- [${file.name || file.id || 'Rule'}] ---\n\n${file.content}`;
                     } else if (file.path) {

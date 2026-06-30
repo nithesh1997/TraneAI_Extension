@@ -181,6 +181,36 @@ export async function updateProjectConfig(req: Request, res: Response): Promise<
     }
 }
 
+export async function deleteWorkspaceFile(req: Request, res: Response): Promise<void> {
+    try {
+        const { rootPath, filePath } = req.body;
+        if (!filePath) {
+            res.status(400).json({ error: 'filePath is required' });
+            return;
+        }
+
+        const { WorkspaceFile } = await import('../models/WorkspaceFile.js');
+        await WorkspaceFile.deleteMany({ filePath: new RegExp(`^${filePath.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}`) });
+
+        // Optionally delete physical if it exists just to be safe
+        if (rootPath && fs.existsSync(rootPath)) {
+            const fullPath = path.join(rootPath, filePath);
+            if (fs.existsSync(fullPath)) {
+                if (fs.statSync(fullPath).isDirectory()) {
+                    fs.rmSync(fullPath, { recursive: true, force: true });
+                } else {
+                    fs.unlinkSync(fullPath);
+                }
+            }
+        }
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete file error:', error);
+        res.status(500).json({ error: 'Failed to delete file' });
+    }
+}
+
 function getEncryptionKey(secret: string): Buffer {
     return crypto.scryptSync(secret || 'traneai-default-secret', 'traneai-salt', 32);
 }
@@ -188,8 +218,8 @@ function getEncryptionKey(secret: string): Buffer {
 export async function uploadWorkspaceFile(req: Request, res: Response): Promise<void> {
     try {
         const { rootPath, mid, roleKey, filePath, content, fileName } = req.body;
-        if (!rootPath || !fs.existsSync(rootPath)) {
-            res.status(400).json({ error: 'Valid workspace root is required' });
+        if (!filePath) {
+            res.status(400).json({ error: 'filePath is required' });
             return;
         }
 
@@ -202,40 +232,64 @@ export async function uploadWorkspaceFile(req: Request, res: Response): Promise<
         const cipher = crypto.createCipheriv('aes-256-cbc', getEncryptionKey(mid), iv);
         const encrypted = Buffer.concat([cipher.update(compressed), cipher.final()]);
         const finalBuffer = Buffer.concat([iv, encrypted]);
+        const contentBase64 = finalBuffer.toString('base64');
 
-        // Ensure directory exists
-        const fullPath = path.join(rootPath, filePath);
-        const dir = path.dirname(fullPath);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-
-        // Write
-        fs.writeFileSync(fullPath, finalBuffer);
+        // Store in DB instead of writing to disk
+        const { WorkspaceFile } = await import('../models/WorkspaceFile.js');
+        await WorkspaceFile.findOneAndUpdate(
+            { filePath },
+            {
+                $set: {
+                    content: contentBase64,
+                    checksum,
+                    encrypted: true
+                }
+            },
+            { new: true, upsert: true }
+        );
 
         res.json({ success: true, checksum, encrypted: true });
     } catch (error) {
         console.error('Upload file error:', error);
-        res.status(500).json({ error: 'Failed to upload and encrypt file' });
+        res.status(500).json({ error: 'Failed to upload and encrypt file to DB' });
     }
 }
 
 export async function getWorkspaceFileContent(req: Request, res: Response): Promise<void> {
     try {
         const { rootPath, mid, filePath, isEncrypted } = req.body;
-        if (!rootPath || !fs.existsSync(rootPath)) {
-            res.status(400).json({ error: 'Valid workspace root is required' });
+        if (!filePath) {
+            res.status(400).json({ error: 'filePath is required' });
             return;
         }
 
-        const fullPath = path.join(rootPath, filePath);
-        if (!fs.existsSync(fullPath)) {
-            res.status(404).json({ error: 'File not found on disk' });
-            return;
+        // Fetch from DB first
+        const { WorkspaceFile } = await import('../models/WorkspaceFile.js');
+        const dbFile = await WorkspaceFile.findOne({ filePath });
+        
+        let buffer: Buffer;
+
+        if (dbFile && dbFile.content) {
+            buffer = Buffer.from(dbFile.content, 'base64');
+        } else {
+            // Fallback to local disk if not found in DB
+            if (!rootPath || !fs.existsSync(rootPath)) {
+                res.status(400).json({ error: 'Valid workspace root is required' });
+                return;
+            }
+            const fullPath = path.join(rootPath, filePath);
+            if (!fs.existsSync(fullPath)) {
+                res.status(404).json({ error: 'File not found on disk or DB' });
+                return;
+            }
+            buffer = fs.readFileSync(fullPath);
         }
 
-        if (isEncrypted) {
-            const buffer = fs.readFileSync(fullPath);
+        if (isEncrypted || (dbFile && dbFile.encrypted)) {
+            if (buffer.length === 0) {
+                res.json({ success: true, content: '' });
+                return;
+            }
             const iv = buffer.subarray(0, 16);
             const encryptedData = buffer.subarray(16);
             const decipher = crypto.createDecipheriv('aes-256-cbc', getEncryptionKey(mid), iv);
@@ -243,7 +297,7 @@ export async function getWorkspaceFileContent(req: Request, res: Response): Prom
             const content = zlib.inflateSync(decrypted).toString('utf-8');
             res.json({ success: true, content });
         } else {
-            const content = fs.readFileSync(fullPath, 'utf-8');
+            const content = buffer.toString('utf-8');
             res.json({ success: true, content });
         }
     } catch (error) {

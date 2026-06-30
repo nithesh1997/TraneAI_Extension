@@ -27,6 +27,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, IChatProvid
 
 	public currentSessionId: string = '';
 	public userEmail: string = '';
+	public userRole: string = 'user';
 	private _checkpointManager: CheckpointManager;
 	public pendingChoices = new Map<string, (value: string) => void>();
     public automationWorkflows = new AutomationWorkflows(this);

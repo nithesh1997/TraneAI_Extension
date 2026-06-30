@@ -2,6 +2,7 @@
 const urlParams = new URLSearchParams(window.location.search);
 const rootPath = urlParams.get('rootPath') || '';
 const mid = urlParams.get('mid') || '';
+const userRole = urlParams.get('role') || 'user';
 let configData = null;
 let currentPath = [];
 let selectedItem = null;
@@ -177,6 +178,17 @@ window.navigateToPath = (pathArr) => {
 
 function renderExplorer() {
   renderBreadcrumb();
+
+  const addFolderBtn = document.getElementById('addFolderBtn');
+  const addFileBtn = document.getElementById('addFileBtn');
+  if (userRole === 'superadmin' || currentPath.length > 0) {
+    if (addFolderBtn) addFolderBtn.style.display = 'inline-flex';
+    if (addFileBtn) addFileBtn.style.display = 'inline-flex';
+  } else {
+    if (addFolderBtn) addFolderBtn.style.display = 'none';
+    if (addFileBtn) addFileBtn.style.display = 'none';
+  }
+
   const vfs = buildVfs();
   if (!vfs) return;
 
@@ -197,8 +209,11 @@ function renderExplorer() {
 
   for (const [name, node] of Object.entries(currentDir.children)) {
     if (query && !name.toLowerCase().includes(query)) continue;
-    if (node.type === 'dir') folders.push({name, node});
-    else files.push({name, node});
+    if (node.type === 'dir') {
+      folders.push({name, node});
+    } else {
+      if (name !== '.keep') files.push({name, node});
+    }
   }
 
   // Icons
@@ -206,13 +221,19 @@ function renderExplorer() {
   const fileIcon = `<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`;
 
   if (folders.length === 0 && files.length === 0) {
+    let emptyButtonsHtml = '';
+    if (userRole === 'superadmin' || currentPath.length > 0) {
+      emptyButtonsHtml = `
+          <button class="btn btn-dark" onclick="document.getElementById('addFolderBtn').click()">Add Folder</button>
+          <button class="btn btn-blue" onclick="document.getElementById('addFileBtn').click()">New File</button>
+      `;
+    }
     explorerGrid.innerHTML = `
       <div class="empty-state" style="grid-column: 1/-1;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg>
         <p>This folder is empty.</p>
         <div style="display:flex; gap:8px;">
-          <button class="btn btn-dark" onclick="document.getElementById('addFolderBtn').click()">Add Folder</button>
-          <button class="btn btn-blue" onclick="document.getElementById('addFileBtn').click()">New File</button>
+          ${emptyButtonsHtml}
         </div>
       </div>`;
     renderSidebar();
@@ -286,17 +307,21 @@ function handleGridContextMenu(e) {
   
   let html = '';
   if (type === 'dir') {
-    html = `
-      <div class="context-item" data-action="open">Open</div>
-      <div class="context-divider"></div>
-      <div class="context-item danger" data-action="deleteFolder">Delete</div>
-    `;
+    html = `<div class="context-item" data-action="open">Open</div>`;
+    if (userRole === 'superadmin' || currentPath.length > 0) {
+      html += `
+        <div class="context-divider"></div>
+        <div class="context-item danger" data-action="deleteFolder">Delete</div>
+      `;
+    }
   } else {
-    html = `
-      <div class="context-item" data-action="edit">Edit</div>
-      <div class="context-divider"></div>
-      <div class="context-item danger" data-action="deleteFile">Delete</div>
-    `;
+    html = `<div class="context-item" data-action="edit">Edit</div>`;
+    if (userRole === 'superadmin' || currentPath.length > 0) {
+      html += `
+        <div class="context-divider"></div>
+        <div class="context-item danger" data-action="deleteFile">Delete</div>
+      `;
+    }
   }
   
   contextMenu.innerHTML = html;
@@ -396,13 +421,32 @@ window.deleteSelectedFile = async () => {
 
 window.deleteSelectedFolder = async () => {
   if (!selectedItem || selectedItem.type !== 'dir') return;
-  if (confirm('Are you sure you want to delete this folder and ALL its contents?')) {
+  if (confirm(`Are you sure you want to delete the folder "${selectedItem.name}" and ALL its contents?`)) {
     // If it's a root folder (roleKey)
     if (currentPath.length === 0) {
       delete configData.roles[selectedItem.name];
     } else {
-      alert('Deleting subfolders is not directly supported yet (they are path-based).');
-      return;
+      const roleKey = currentPath[0];
+      const subfolders = currentPath.slice(1).join('/');
+      let prefix = `.traneAI/${roleKey}/`;
+      if (subfolders) prefix += subfolders + '/';
+      prefix += selectedItem.name + '/';
+      
+      const roleFiles = configData.roles[roleKey].files || [];
+      const filesToDelete = roleFiles.filter(f => (f.path || '').startsWith(prefix));
+      
+      for (const file of filesToDelete) {
+        try {
+          await fetch('/api/workspace/delete-file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rootPath, filePath: file.path })
+          });
+        } catch (e) {
+          console.error('Failed to delete physical file', e);
+        }
+      }
+      configData.roles[roleKey].files = roleFiles.filter(f => !(f.path || '').startsWith(prefix));
     }
     selectedItem = null;
     if (await saveConfig()) renderExplorer();
@@ -496,17 +540,59 @@ window.saveEditorContent = async () => {
 
 // Global Actions
 async function addFolder() {
-  if (currentPath.length !== 0) {
-    alert('Nested folders are mapped automatically via file paths. Add a root folder here.');
-    return;
-  }
-  const roleName = prompt('Enter the name of the new Root Folder (Role):');
-  if (!roleName) return;
-  const key = roleName.trim().toLowerCase();
-  if (!configData.roles[key]) {
-    configData.roles[key] = { enabled: true, files: [] };
-    await saveConfig();
-    renderExplorer();
+  if (currentPath.length === 0) {
+    const roleName = prompt('Enter the name of the new Root Folder (Role):');
+    if (!roleName) return;
+    const key = roleName.trim().toLowerCase();
+    if (!configData.roles[key]) {
+      configData.roles[key] = { enabled: true, files: [] };
+      await saveConfig();
+      renderExplorer();
+    }
+  } else {
+    const folderName = prompt('Enter the name of the new folder:');
+    if (!folderName) return;
+    const name = folderName.trim();
+    if (!name) return;
+    
+    const roleKey = currentPath[0];
+    const subfolders = currentPath.slice(1).join('/');
+    let newPath = `.traneAI/${roleKey}/`;
+    if (subfolders) newPath += subfolders + '/';
+    newPath += name + '/.keep';
+    
+    try {
+      const uploadRes = await fetch('/api/workspace/upload-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rootPath, mid, roleKey, filePath: newPath, content: '', fileName: '.keep' })
+      });
+      const uploadJson = await uploadRes.json();
+      
+      if (uploadJson.success) {
+        const newFile = {
+          id: name + '_keep',
+          name: '.keep',
+          fileName: '.keep',
+          path: newPath,
+          version: 1,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          checksum: uploadJson.checksum,
+          encrypted: uploadJson.encrypted
+        };
+
+        if (!configData.roles[roleKey].files) configData.roles[roleKey].files = [];
+        configData.roles[roleKey].files.push(newFile);
+        await saveConfig();
+        renderExplorer();
+      } else {
+        alert('Failed to create folder');
+      }
+    } catch (e) {
+      console.error('Error creating folder', e);
+      alert('Error creating folder');
+    }
   }
 }
 
@@ -552,10 +638,32 @@ async function addFile() {
           };
 
           if (!configData.roles[roleKey].files) configData.roles[roleKey].files = [];
+          
+          // Clean up .keep file if it exists in this directory
+          let keepPath = `.traneAI/${roleKey}/`;
+          if (subfolders) keepPath += subfolders + '/';
+          keepPath += '.keep';
+          
+          const keepIndex = configData.roles[roleKey].files.findIndex(f => f.path === keepPath);
+          if (keepIndex !== -1) {
+            try {
+              fetch('/api/workspace/delete-file', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rootPath, filePath: keepPath })
+              });
+            } catch (e) {
+              console.error('Failed to delete .keep from DB', e);
+            }
+            configData.roles[roleKey].files.splice(keepIndex, 1);
+          }
+
           configData.roles[roleKey].files.push(newFile);
           await saveConfig();
           
-          selectedItem = { type: 'file', name: file.name, node: { roleKey, fileIndex: configData.roles[roleKey].files.length - 1, fileRef: newFile } };
+          // Recalculate fileIndex since we might have spliced the array
+          const newIndex = configData.roles[roleKey].files.length - 1;
+          selectedItem = { type: 'file', name: file.name, node: { roleKey, fileIndex: newIndex, fileRef: newFile } };
           renderExplorer();
         } else {
           alert('Failed to upload file');

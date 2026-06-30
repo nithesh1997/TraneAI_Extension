@@ -29,7 +29,8 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
             // Launch the external web app served by the backend
             const rootParam = workspaceRoot ? `&rootPath=${encodeURIComponent(workspaceRoot)}` : '';
             const midParam = vscode_api.env.machineId ? `&mid=${vscode_api.env.machineId}` : '';
-            vscode_api.env.openExternal(vscode_api.Uri.parse(`http://localhost:5000/api/workspace/admin?projectName=${projectName}${rootParam}${midParam}`));
+            const roleParam = provider.userRole ? `&role=${provider.userRole}` : '';
+            vscode_api.env.openExternal(vscode_api.Uri.parse(`http://localhost:5000/api/workspace/admin?projectName=${projectName}${rootParam}${midParam}${roleParam}`));
             break;
         }
         case 'updateProjectConfig': {
@@ -76,6 +77,7 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                 if (result.success) {
                     const prevEmail = provider.userEmail;
                     provider.userEmail = email;
+                    provider.userRole = result.user?.role || 'user';
                     provider.sessionManager.ensureTraneAIDir();
                     if (prevEmail && prevEmail !== provider.userEmail) {
                         provider.createNewSession();
@@ -120,6 +122,7 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                 if (result.success) {
                     const prevEmail = provider.userEmail;
                     provider.userEmail = email;
+                    provider.userRole = result.user?.role || 'user';
                     provider.sessionManager.ensureTraneAIDir();
                     if (prevEmail && prevEmail !== provider.userEmail) {
                         provider.createNewSession();
@@ -214,19 +217,35 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
             provider.abortController = new AbortController();
 
             const workspaceAppRoot = provider.findWorkspaceAppRoot();
-            const modeRules = extractRulesForMode(workspaceAppRoot, data.model);
 
-            provider.sendToBackend(enrichedText, data.model, data.attachments, provider.abortController.signal, modeRules).then(() => {
-                provider.broadcastTyping(false);
-                provider.saveCurrentSession();
-                provider.broadcastHistoryList();
-            }).catch((error: any) => {
-                provider.broadcastTyping(false);
-                if (error.name !== 'AbortError') {
-                    provider.addMessage('ai', `Error: ${error.message}`);
+            const proceedWithSend = () => {
+                const modeRules = extractRulesForMode(workspaceAppRoot, data.model);
+
+                provider.sendToBackend(enrichedText, data.model, data.attachments, provider.abortController!.signal, modeRules).then(() => {
+                    provider.broadcastTyping(false);
                     provider.saveCurrentSession();
-                }
-            });
+                    provider.broadcastHistoryList();
+                }).catch((error: any) => {
+                    provider.broadcastTyping(false);
+                    if (error.name !== 'AbortError') {
+                        provider.addMessage('ai', `Error: ${error.message}`);
+                        provider.saveCurrentSession();
+                    }
+                });
+            };
+
+            if (workspaceAppRoot && data.model) {
+                const config = provider.sessionManager.loadProjectConfig();
+                const machineId = vscode_api.env.machineId || 'unknown';
+                BackendService.syncModeFilesLocally(workspaceAppRoot, data.model, config, machineId)
+                    .then(proceedWithSend)
+                    .catch((e) => {
+                        console.error('Failed to sync mode files:', e);
+                        proceedWithSend();
+                    });
+            } else {
+                proceedWithSend();
+            }
 
             break;
         case 'quickAction':

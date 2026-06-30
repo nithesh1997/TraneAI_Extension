@@ -1,5 +1,5 @@
 import express from 'express';
-import { getWorkspaceFiles, getWorkspaceFolders, getWorkspaceBranches, getProjectConfig, updateProjectConfig, serveAdminPortalClient, uploadWorkspaceFile, getWorkspaceFileContent } from '../controllers/workspaceController.js';
+import { getWorkspaceFiles, getWorkspaceFolders, getWorkspaceBranches, getProjectConfig, updateProjectConfig, serveAdminPortalClient, uploadWorkspaceFile, getWorkspaceFileContent, deleteWorkspaceFile } from '../controllers/workspaceController.js';
 
 const router = express.Router();
 
@@ -72,6 +72,16 @@ router.post('/upload-file', uploadWorkspaceFile);
  *       - Workspace
  */
 router.post('/file-content', getWorkspaceFileContent);
+
+/**
+ * @swagger
+ * /api/workspace/delete-file:
+ *   post:
+ *     summary: Delete a workspace file
+ *     tags:
+ *       - Workspace
+ */
+router.post('/delete-file', deleteWorkspaceFile);
 
 /**
  * @swagger
