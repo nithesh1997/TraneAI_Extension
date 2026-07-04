@@ -106,7 +106,7 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                     }
 
                     provider.postMessageToWebview({ type: 'authLoading', value: false });
-                    provider.postMessageToWebview({ type: 'authResult', success: true, email, token: result.token });
+                    provider.postMessageToWebview({ type: 'authResult', success: true, email, token: result.token, role: result.user?.role || 'user' });
                     provider.broadcastHistoryList();
                 } else {
                     provider.postMessageToWebview({ type: 'authLoading', value: false });
@@ -151,7 +151,7 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                     }
 
                     provider.postMessageToWebview({ type: 'authLoading', value: false });
-                    provider.postMessageToWebview({ type: 'authResult', success: true, email, token: result.token });
+                    provider.postMessageToWebview({ type: 'authResult', success: true, email, token: result.token, role: result.user?.role || 'user' });
                     provider.broadcastHistoryList();
                 } else {
                     provider.postMessageToWebview({ type: 'authLoading', value: false });

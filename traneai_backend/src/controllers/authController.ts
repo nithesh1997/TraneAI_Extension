@@ -14,6 +14,11 @@ export async function handleSignup(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    if (!email.toLowerCase().includes('tranetechnologies.com')) {
+      res.status(400).json({ error: 'Email must be a tranetechnologies.com address' });
+      return;
+    }
+
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       res.status(409).json({ error: 'User already exists' });
@@ -26,10 +31,18 @@ export async function handleSignup(req: Request, res: Response): Promise<void> {
     // Using email username as default name
     const name = email.split('@')[0];
 
+    let role = 'user';
+    if (email.startsWith('superadmin@')) {
+      role = 'superadmin';
+    } else if (email.startsWith('admin@')) {
+      role = 'admin';
+    }
+
     const newUser = new User({
       email,
       password: hashedPassword,
-      name
+      name,
+      role
     });
 
     await newUser.save();
@@ -65,6 +78,11 @@ export async function handleLogin(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    if (!email.toLowerCase().includes('tranetechnologies.com')) {
+      res.status(400).json({ error: 'Email must be a tranetechnologies.com address' });
+      return;
+    }
+
     const user = await User.findOne({ email });
     if (!user) {
       res.status(401).json({ error: 'Invalid email or password' });
@@ -77,8 +95,19 @@ export async function handleLogin(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    let updatedRole = user.role;
+    if (email.startsWith('superadmin@') && user.role !== 'superadmin') {
+      user.role = 'superadmin';
+      await user.save();
+      updatedRole = 'superadmin';
+    } else if (email.startsWith('admin@') && user.role !== 'admin') {
+      user.role = 'admin';
+      await user.save();
+      updatedRole = 'admin';
+    }
+
     const token = jwt.sign(
-      { id: user._id, email: user.email, name: user.name, role: user.role },
+      { id: user._id, email: user.email, name: user.name, role: updatedRole },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -90,7 +119,7 @@ export async function handleLogin(req: Request, res: Response): Promise<void> {
         id: user._id,
         email: user.email,
         name: user.name,
-        role: user.role
+        role: updatedRole
       }
     });
   } catch (error) {

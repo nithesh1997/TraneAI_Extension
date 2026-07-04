@@ -73,6 +73,156 @@
         <div id="historyContainer" style="display:none; padding:20px; color:#ddd; height:100%;">No history available.</div>
       </div>
     </div>
+    
+    <!-- View 3: Superadmin Dashboard -->
+    <div id="viewSuperadmin" class="view sa-layout" style="display: none;">
+      <!-- Sidebar -->
+      <div class="sa-sidebar">
+        <div class="sa-sidebar-logo">
+          <div class="sa-logo-icon">RJ</div>
+          <div class="sa-logo-text">
+            <div class="sa-logo-title">Super Admin</div>
+            <div class="sa-logo-sub">Workspace</div>
+          </div>
+        </div>
+        
+        <div class="sa-sidebar-section">
+          <div class="sa-sidebar-title">OVERVIEW</div>
+          <a href="#" class="sa-sidebar-item active">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            Projects
+            <span class="sa-badge-count" id="sidebarProjCount">0</span>
+          </a>
+          <a href="#" class="sa-sidebar-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+            Deployments
+          </a>
+          <a href="#" class="sa-sidebar-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            Sync logs
+          </a>
+        </div>
+        
+        <div class="sa-sidebar-section">
+          <div class="sa-sidebar-title">INSIGHTS</div>
+          <a href="#" class="sa-sidebar-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+            Reports
+          </a>
+          <a href="#" class="sa-sidebar-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            Integrations
+          </a>
+          <a href="#" class="sa-sidebar-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            Team
+          </a>
+        </div>
+        
+        <div class="sa-sidebar-section">
+          <div class="sa-sidebar-title">GENERAL</div>
+          <a href="#" class="sa-sidebar-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            Settings
+          </a>
+        </div>
+        
+        <div class="sa-sidebar-user">
+          <div class="sa-user-avatar">RJ</div>
+          <div class="sa-user-info">
+            <div class="sa-user-name">Riya Jacob</div>
+            <div class="sa-user-role">Super Admin</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Main Content -->
+      <div class="sa-main">
+        <div class="sa-container">
+          <!-- Header -->
+          <div class="sa-header">
+            <div class="sa-header-left">
+              <h1 class="sa-title">Projects</h1>
+              <p class="sa-subtitle"><span id="saProjectCount">0</span> projects tracked across your workspace</p>
+            </div>
+            <div class="sa-header-right">
+              <input type="text" class="sa-search" placeholder="Search projects" id="saSearchInput" />
+              <!-- <button class="sa-btn-primary">
+                + New project
+              </button> -->
+            </div>
+          </div>
+          
+          <!-- Stats -->
+          <div class="sa-stats">
+            <div class="sa-stat-card">
+              <div class="sa-stat-label">Total projects</div>
+              <div class="sa-stat-val" id="saStatTotal">0</div>
+            </div>
+            <div class="sa-stat-card">
+              <div class="sa-stat-label">Synced</div>
+              <div class="sa-stat-val text-green" id="saStatSynced">0</div>
+            </div>
+            <div class="sa-stat-card">
+              <div class="sa-stat-label">Pending sync</div>
+              <div class="sa-stat-val text-orange" id="saStatPending">0</div>
+            </div>
+            <div class="sa-stat-card">
+              <div class="sa-stat-label">Latest created</div>
+              <div class="sa-stat-val sa-stat-latest" id="saStatLatest">-</div>
+            </div>
+          </div>
+          
+          <!-- Table View -->
+          <div id="superadminTableContainer" class="sa-table-wrapper">
+            <table class="sa-table">
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Version</th>
+                  <th>Last synced</th>
+                  <th>Created</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="superadminTableBody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+  
+          <!-- Report View -->
+          <div id="superadminReportContainer" class="hidden-initially" style="margin-top: 0;">
+            <div class="sa-header">
+              <div class="sa-header-left">
+                <button class="sa-btn-secondary" id="superadminBackBtn" style="margin-bottom: 12px; border: none; padding: 0; color: #a1a1aa; background: transparent; font-size: 13px;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                  Back to Projects
+                </button>
+                <h1 class="sa-title" id="reportProjectTitle">Project Details</h1>
+                <p class="sa-subtitle" id="reportProjectSubtitle">Role and file overview</p>
+              </div>
+            </div>
+
+            <div class="sa-table-wrapper" style="margin-top: 24px;">
+              <table class="sa-table">
+                <thead>
+                  <tr>
+                    <th>Module / Role</th>
+                    <th>Status</th>
+                    <th>Files Count</th>
+                    <th>Last Updated</th>
+                  </tr>
+                </thead>
+                <tbody id="reportTableBody">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Context Menu -->

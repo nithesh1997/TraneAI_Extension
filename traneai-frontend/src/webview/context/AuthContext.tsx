@@ -7,6 +7,7 @@ const AUTH_STORAGE_KEY = 'traneai_auth';
 interface AuthState {
 	isAuthenticated: boolean;
 	email: string | null;
+	role: string | null;
     isLoading: boolean;
     error: string | null;
 }
@@ -14,6 +15,7 @@ interface AuthState {
 interface StoredAuth {
 	email: string;
 	isAuthenticated: boolean;
+	role?: string;
 }
 
 interface AuthContextValue extends AuthState {
@@ -30,6 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 	const [authState, setAuthState] = useState<AuthState>({
 		isAuthenticated: false,
 		email: null,
+		role: null,
         isLoading: false,
         error: null
 	});
@@ -37,8 +40,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 	useEffect(() => {
 		secureRetrieve<StoredAuth>(AUTH_STORAGE_KEY).then(stored => {
 			if (stored?.isAuthenticated && stored?.email) {
-				setAuthState(prev => ({ ...prev, isAuthenticated: true, email: stored.email }));
-				vscode.postMessage({ command: 'syncAuth', email: stored.email }); // Sync with extension host
+				setAuthState(prev => ({ ...prev, isAuthenticated: true, email: stored.email, role: stored.role || 'user' }));
+				vscode.postMessage({ command: 'syncAuth', email: stored.email, role: stored.role }); // Sync with extension host
 			}
 		});
 	}, []);
@@ -54,10 +57,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         ...prev,
                         isAuthenticated: true,
                         email: data.email,
+                        role: data.role || 'user',
                         isLoading: false,
                         error: null
                     }));
-                    secureStore(AUTH_STORAGE_KEY, { email: data.email, isAuthenticated: true, token: data.token });
+                    secureStore(AUTH_STORAGE_KEY, { email: data.email, isAuthenticated: true, token: data.token, role: data.role || 'user' });
                 } else {
                     setAuthState(prev => ({ ...prev, isLoading: false, error: data.error }));
                     message.error(data.error || 'Authentication failed');
@@ -79,7 +83,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 	const logout = useCallback(() => {
 		vscode.postMessage({ command: 'logout' });
-		setAuthState({ isAuthenticated: false, email: null, isLoading: false, error: null });
+		setAuthState({ isAuthenticated: false, email: null, role: null, isLoading: false, error: null });
 		secureClear(AUTH_STORAGE_KEY);
 	}, []);
 

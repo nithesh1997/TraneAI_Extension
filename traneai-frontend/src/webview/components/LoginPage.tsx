@@ -98,7 +98,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ logoUri, onSwitchToSignup 
 					</Button>
 
 					<div className="login-nav">
-						Don't have an account? <span onClick={onSwitchToSignup}>Sign Up</span>
+						Don't have an account? <span 
+						// onClick={onSwitchToSignup}
+						>Sign Up</span>
 					</div>
 
 					<div className="login-divider" />

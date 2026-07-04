@@ -30,7 +30,7 @@ declare const vscode: any;
 declare const LOGO_URI: string;
 
 const ChatApp: React.FC = () => {
-	const { isAuthenticated, email } = useAuth();
+	const { isAuthenticated, email, role } = useAuth();
 	const [authView, setAuthView] = useState<'login' | 'signup'>('login');
 	const [messages, setMessages] = useState<MessageData[]>([]);
 	const [isTyping, setIsTyping] = useState(false);
@@ -298,10 +298,12 @@ const ChatApp: React.FC = () => {
 		<div className="main-content">
 			<AppHeader
 				logoUri={LOGO_URI}
+				role={role}
 				onNewChat={handleNewChat}
 				onClearChat={handleClearChat}
 				onShowHistory={handleShowHistory}
 				onShowAdmin={() => vscode.postMessage({ command: 'openAdminWeb' })}
+				onShowSuperadmin={() => vscode.postMessage({ command: 'openAdminWeb' })}
 			/>
 			<div id="chat-container" className="chat-container">
 				<HeroSection logoUri={LOGO_URI} onQuickSend={handleQuickSend} visible={messages.length === 0} currentModel={currentModel} />

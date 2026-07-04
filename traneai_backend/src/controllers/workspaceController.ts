@@ -110,6 +110,54 @@ export async function getWorkspaceBranches(req: Request, res: Response): Promise
     }
 }
 
+export async function getWorkspaceModes(req: Request, res: Response): Promise<void> {
+    const modes = [
+        { 
+            id: 'auto', 
+            name: 'Auto', 
+            icon: `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M9 1L2 9h5l-1 6 7-8H8l1-6z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`,
+            canAttachFiles: true
+        },
+        { 
+            id: 'zenflow', 
+            name: 'Zenflow', 
+            icon: `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:#252525;color:#e6e6e6;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 2C8 2 3 6.5 3 10C3 12.7614 5.23858 15 8 15C10.7614 15 13 12.7614 13 10C13 6.5 8 2 8 2Z" stroke="currentColor" stroke-width="1.5"/><path d="M5 11H11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>`,
+            canAttachFiles: true
+        },
+        { 
+            id: 'new-joiner', 
+            name: 'New joiner', 
+            icon: `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:#043615;color:#22c55e;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 14V6M8 6C8 6 5.5 3.5 3.5 3.5C2 3.5 2 5.5 2 7.5C2 9.5 8 9.5 8 9.5M8 6C8 6 10.5 3.5 12.5 3.5C14 3.5 14 5.5 14 7.5C14 9.5 8 9.5 8 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`,
+            canAttachFiles: true
+        },
+        { 
+            id: 'developers', 
+            name: 'Developers', 
+            icon: `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:#111d4a;color:#93c5fd;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M5 4L2 8l3 4M11 4l3 4-3 4M9 2L7 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`,
+            canAttachFiles: true
+        },
+        { 
+            id: 'qa', 
+            name: 'QA', 
+            icon: `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:#2e104f;color:#d8b4fe;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1L3 3v4c0 4 5 8 5 8s5-4 5-8V3L8 1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"/></svg></span>`,
+            canAttachFiles: true
+        },
+        { 
+            id: 'eva', 
+            name: 'EVA', 
+            icon: `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:#4a1010;color:#fca5a5;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="3" y="5" width="10" height="8" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v3M10 2v3M5 9h1M10 9h1M7 13v-2h2v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>`,
+            canAttachFiles: true
+        },
+        { 
+            id: 'automated-testing', 
+            name: 'Automated testing', 
+            icon: `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:#282828;color:#e5e5e5;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M5.5 2h5M8 2v5L4 13h8L8 7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5 10h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>`,
+            canAttachFiles: true
+        }
+    ];
+    res.json(modes);
+}
+
 export async function getProjectConfig(req: Request, res: Response): Promise<void> {
     try {
         console.log("req.body",req.body);
@@ -137,6 +185,17 @@ export async function getProjectConfig(req: Request, res: Response): Promise<voi
     } catch (error) {
         console.error('Project config error:', error);
         res.status(500).json({ error: 'Failed to retrieve project config' });
+    }
+}
+
+export async function getAllProjects(req: Request, res: Response): Promise<void> {
+    try {
+        const { ProjectConfig } = await import('../models/ProjectConfig.js');
+        const projects = await ProjectConfig.find({});
+        res.json(projects);
+    } catch (error) {
+        console.error('Get all projects error:', error);
+        res.status(500).json({ error: 'Failed to retrieve all projects' });
     }
 }
 

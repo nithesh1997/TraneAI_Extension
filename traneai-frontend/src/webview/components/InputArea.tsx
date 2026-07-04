@@ -13,7 +13,7 @@ import {
 	CodeBlock,
 	detectAndHighlight,
 	isLikelyCode,
-	MODELS,
+	Model,
 	SKILLS,
 	MODE_SKILLS,
 	CONTEXT_OPTIONS
@@ -133,6 +133,10 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 		return () => window.removeEventListener('message', handleMessage);
 	}, []);
 
+	const [models, setModels] = useState<Model[]>([
+		{ id: 'auto', name: 'Auto', icon: '⚡', canAttachFiles: true }
+	]);
+
 	// Fetch workspace files and folders
 	useEffect(() => {
 		const fetchData = async () => {
@@ -164,6 +168,13 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 				if (branchesResponse.ok) {
 					const branches = await branchesResponse.json();
 					setWorkspaceBranches(branches);
+				}
+				
+				// Fetch models (modes)
+				const modesResponse = await fetch(`http://localhost:5000/api/workspace/modes`);
+				if (modesResponse.ok) {
+					const fetchedModes = await modesResponse.json();
+					setModels(fetchedModes);
 				}
 			} catch (error) {
 				console.error('Failed to fetch workspace data:', error);
@@ -482,7 +493,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	const selectedSkillsSet = new Set(selectedSkillTags);
 
 	useEffect(() => {
-		const currentModelData = MODELS.find(m => m.id === currentModel);
+		const currentModelData = models.find(m => m.id === currentModel);
 		if (currentModelData?.canAttachFiles === false && attachedFiles.length > 0) {
 			setAttachedFiles([]);
 			onFilesSelected([]);
@@ -510,7 +521,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 	}, []);
 
 	const hasSkills = (MODE_SKILLS[currentModel] || []).length > 0;
-	const currentModelData = MODELS.find(m => m.id === currentModel);
+	const currentModelData = models.find(m => m.id === currentModel);
 	const canAttach = currentModelData?.canAttachFiles !== false;
 	
 	return (
@@ -861,13 +872,18 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({ onSendMessage, 
 							{showModelDropdown && (
 								<div className="dropdown-menu show" id="model-dropdown">
 									<div className="dropdown-label">Select Mode</div>
-									{MODELS.map(model => (
+									{models.map(model => (
 										<div
 											key={model.id}
 											className={`dropdown-item ${currentModel === model.id ? 'selected' : ''}`}
 											onClick={() => { onModelChange(model.id); setShowModelDropdown(false); }}
 										>
-											<span>{model.icon}</span>{model.name}
+											{typeof model.icon === 'string' && model.icon.startsWith('<') ? (
+												<span style={{ display: 'inline-flex', alignItems: 'center', marginRight: '8px' }} dangerouslySetInnerHTML={{ __html: model.icon }} />
+											) : (
+												<span style={{ display: 'inline-flex', alignItems: 'center', marginRight: '8px' }}>{model.icon}</span>
+											)}
+											{model.name}
 											{currentModel === model.id && <span className="item-check">✓</span>}
 										</div>
 									))}

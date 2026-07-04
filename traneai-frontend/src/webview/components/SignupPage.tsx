@@ -42,7 +42,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ logoUri, onSwitchToLogin
 					name="email"
 					rules={[
 						{ required: true, message: 'Email is required' },
-						{ type: 'email', message: 'Enter a valid email' },
+						{ type: 'email', message: 'Enter a valid email' }
 					]}
 				>
 					<Input

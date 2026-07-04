@@ -7,6 +7,7 @@ let configData = null;
 let currentPath = [];
 let selectedItem = null;
 let editorInstance = null;
+let allProjectsData = [];
 
 // DOM Elements
 const explorerGrid = document.getElementById('explorerGrid');
@@ -19,7 +20,27 @@ const contextMenu = document.getElementById('contextMenu');
 
 // Initialize
 async function init() {
-  await loadConfig();
+  if (userRole === 'superadmin') {
+    document.getElementById('viewExplorer').classList.remove('active');
+    const viewSuperadmin = document.getElementById('viewSuperadmin');
+    if (viewSuperadmin) viewSuperadmin.classList.add('active');
+    
+    // Hide topbar elements for superadmin
+    const topbar = document.querySelector('.topbar');
+    if (topbar) topbar.style.display = 'none';
+    
+    const backBtn = document.getElementById('superadminBackBtn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => {
+        document.getElementById('superadminReportContainer').style.display = 'none';
+        document.getElementById('superadminTableContainer').style.display = 'block';
+      });
+    }
+    
+    await loadAllProjects();
+  } else {
+    await loadConfig();
+  }
   
   // Event delegation for grid items to handle single/double clicks reliably
   explorerGrid.addEventListener('click', handleGridClick);
@@ -81,7 +102,10 @@ async function init() {
   // Buttons
   document.getElementById('addFolderBtn').addEventListener('click', addFolder);
   document.getElementById('addFileBtn').addEventListener('click', addFile);
-  document.getElementById('refreshBtn').addEventListener('click', loadConfig);
+  document.getElementById('refreshBtn').addEventListener('click', () => {
+    if (userRole === 'superadmin') loadAllProjects();
+    else loadConfig();
+  });
 
   // Initialize Monaco Editor
   require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
@@ -110,6 +134,32 @@ async function loadConfig() {
     const json = await res.json();
     if (json.project) {
       configData = json;
+      if (!configData.roles) configData.roles = {};
+
+      if (userRole !== 'superadmin') {
+        try {
+          const modeRes = await fetch('/api/workspace/modes');
+          if (modeRes.ok) {
+            const modes = await modeRes.json();
+            let configChanged = false;
+            
+            for (const mode of modes) {
+              const folderKey = mode.name;
+              if (!configData.roles[folderKey]) {
+                configData.roles[folderKey] = { enabled: true, files: [] };
+                configChanged = true;
+              }
+            }
+            
+            if (configChanged) {
+              await saveConfig();
+            }
+          }
+        } catch (e) {
+          console.error('Failed to auto-create modes', e);
+        }
+      }
+      
       renderExplorer();
     }
   } catch (e) {
@@ -129,6 +179,161 @@ async function saveConfig() {
     return false;
   }
 }
+
+async function loadAllProjects() {
+  try {
+    const res = await fetch('/api/workspace/all-projects');
+    const projects = await res.json();
+    allProjectsData = projects;
+    renderSuperadminTable();
+  } catch (e) {
+    console.error('Failed to load all projects', e);
+  }
+}
+
+function renderSuperadminTable() {
+  const tbody = document.getElementById('superadminTableBody');
+  if (!tbody) return;
+  
+  let syncedCount = 0;
+  let pendingCount = 0;
+  let latestProj = '-';
+  let latestDate = 0;
+
+  let html = '';
+  allProjectsData.forEach((p, index) => {
+    const projName = p.projectName || 'Unknown';
+    const version = p.project?.version || 'v1.0.0';
+    const lastSyncedStr = p.project?.lastSynced ? new Date(p.project.lastSynced).toLocaleString() : 'Never';
+    const createdAt = p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'Unknown';
+    
+    // Stats logic
+    if (p.project?.lastSynced) syncedCount++;
+    else pendingCount++;
+    
+    if (p.createdAt) {
+      const ts = new Date(p.createdAt).getTime();
+      if (ts > latestDate) {
+        latestDate = ts;
+        latestProj = projName;
+      }
+    }
+
+    const icon = index % 2 === 0 
+      ? `<svg class="proj-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>`
+      : `<svg class="proj-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>`;
+
+    const badgeHtml = p.project?.lastSynced 
+      ? `<span class="sa-badge" style="background:#dcfce7; color:#16a34a;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Synced</span>`
+      : `<span class="sa-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> Never</span>`;
+
+    html += `
+      <tr data-index="${index}" style="cursor: pointer;">
+        <td><div class="proj-name-cell">${icon} ${escapeHtml(projName)}</div></td>
+        <td style="color: #6b7280; font-family: monospace;">${escapeHtml(version.startsWith('v') ? version : 'v' + version)}</td>
+        <td>${badgeHtml}</td>
+        <td>${escapeHtml(createdAt)}</td>
+        <td style="text-align: right;"><button class="sa-btn-secondary" style="display:inline-flex; width:auto; margin-left:auto;">View report</button></td>
+      </tr>
+    `;
+  });
+  
+  if (allProjectsData.length === 0) {
+    html = `<tr><td colspan="5" style="text-align:center; padding: 40px; color: #888;">No projects found.</td></tr>`;
+  }
+  
+  tbody.innerHTML = html;
+  
+  // Update Stats
+  document.getElementById('saProjectCount').textContent = allProjectsData.length;
+  document.getElementById('saStatTotal').textContent = allProjectsData.length;
+  document.getElementById('saStatSynced').textContent = syncedCount;
+  document.getElementById('saStatPending').textContent = pendingCount;
+  document.getElementById('saStatLatest').textContent = latestProj;
+  if (document.getElementById('sidebarProjCount')) {
+    document.getElementById('sidebarProjCount').textContent = allProjectsData.length;
+  }
+  
+  // Add row clicks
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('click', (e) => {
+      const idx = tr.getAttribute('data-index');
+      if (idx !== null) viewProjectReport(idx, e);
+    });
+  });
+}
+
+window.viewProjectReport = (index, event) => {
+  if (event) event.stopPropagation();
+  const projectDoc = allProjectsData[index];
+  if (!projectDoc) return;
+  
+  document.getElementById('superadminTableContainer').style.display = 'none';
+  // Also hide stats and top header for a cleaner report view
+  document.querySelector('.sa-stats').style.display = 'none';
+  document.querySelector('.sa-header').style.display = 'none';
+  
+  document.getElementById('superadminReportContainer').style.display = 'block';
+  
+  // Update back button to restore header/stats
+  const backBtn = document.getElementById('superadminBackBtn');
+  backBtn.onclick = () => {
+    document.getElementById('superadminReportContainer').style.display = 'none';
+    document.getElementById('superadminTableContainer').style.display = 'block';
+    document.querySelector('.sa-stats').style.display = 'grid';
+    document.querySelector('.sa-header').style.display = 'flex';
+  };
+  
+  document.getElementById('reportProjectTitle').textContent = `${projectDoc.projectName}`;
+  
+  const tbody = document.getElementById('reportTableBody');
+  let html = '';
+  
+  const roles = projectDoc.roles || {};
+  const roleKeys = Object.keys(roles);
+  
+  if (roleKeys.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 40px; color: #888;">No modules or folders found in this project.</td></tr>';
+    return;
+  }
+  
+  const folderIcon = `<svg class="proj-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
+  
+  roleKeys.forEach(roleName => {
+    const roleData = roles[roleName];
+    const files = roleData.files || [];
+    const actualFiles = files.filter(f => f.name !== '.keep');
+    
+    const enabled = roleData.enabled !== false; // defaults to true
+    const badgeHtml = enabled 
+      ? `<span class="sa-badge" style="background:#dcfce7; color:#16a34a;">Enabled</span>`
+      : `<span class="sa-badge" style="background:#f3f4f6; color:#6b7280;">Disabled</span>`;
+      
+    // Find the latest updated file for this role
+    let lastUpdated = '-';
+    let latestTs = 0;
+    actualFiles.forEach(f => {
+      if (f.updatedAt) {
+        const ts = new Date(f.updatedAt).getTime();
+        if (ts > latestTs) {
+          latestTs = ts;
+          lastUpdated = new Date(f.updatedAt).toLocaleDateString();
+        }
+      }
+    });
+
+    html += `
+      <tr>
+        <td><div class="proj-name-cell">${folderIcon} ${escapeHtml(roleName)}</div></td>
+        <td>${badgeHtml}</td>
+        <td style="font-weight: 600;">${actualFiles.length}</td>
+        <td style="color: #6b7280;">${lastUpdated}</td>
+      </tr>
+    `;
+  });
+  
+  tbody.innerHTML = html;
+};
 
 // VFS logic
 function buildVfs() {
@@ -221,20 +426,10 @@ function renderExplorer() {
   const fileIcon = `<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`;
 
   if (folders.length === 0 && files.length === 0) {
-    let emptyButtonsHtml = '';
-    if (userRole === 'superadmin' || currentPath.length > 0) {
-      emptyButtonsHtml = `
-          <button class="btn btn-dark" onclick="document.getElementById('addFolderBtn').click()">Add Folder</button>
-          <button class="btn btn-blue" onclick="document.getElementById('addFileBtn').click()">New File</button>
-      `;
-    }
     explorerGrid.innerHTML = `
       <div class="empty-state" style="grid-column: 1/-1;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg>
         <p>This folder is empty.</p>
-        <div style="display:flex; gap:8px;">
-          ${emptyButtonsHtml}
-        </div>
       </div>`;
     renderSidebar();
     return;

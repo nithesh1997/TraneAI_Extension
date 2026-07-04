@@ -42,15 +42,12 @@ export function isLikelyCode(text: string): boolean {
 	return matchedLines.length >= Math.max(2, lines.length * 0.3);
 }
 
-export const MODELS = [
-	{ id: 'auto', name: 'Auto', icon: '⚡', canAttachFiles: true },
-	{ id: 'zenflow', name: 'Zenflow', icon: '🌊', canAttachFiles: true },
-	{ id: 'new-joiner', name: 'New Joiner', icon: '🧩', canAttachFiles: true },
-	{ id: 'developers', name: 'Developers', icon: '💻', canAttachFiles: true },
-	{ id: 'qa', name: 'QA', icon: '🧪', canAttachFiles: true },
-	{ id: 'eva', name: 'EVA', icon: '🤖', canAttachFiles: true },
-	{ id: 'automated-testing', name: 'Automated Testing', icon: '🔄', canAttachFiles: true },
-];
+export interface Model {
+	id: string;
+	name: string;
+	icon: string | React.ReactNode;
+	canAttachFiles?: boolean;
+}
 
 export const SKILLS = [
 	{ id: 'review', icon: '🔍' },

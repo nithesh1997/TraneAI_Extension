@@ -1,5 +1,5 @@
 import express from 'express';
-import { getWorkspaceFiles, getWorkspaceFolders, getWorkspaceBranches, getProjectConfig, updateProjectConfig, serveAdminPortalClient, uploadWorkspaceFile, getWorkspaceFileContent, deleteWorkspaceFile } from '../controllers/workspaceController.js';
+import { getAllProjects, getWorkspaceModes, getWorkspaceFiles, getWorkspaceFolders, getWorkspaceBranches, getProjectConfig, updateProjectConfig, serveAdminPortalClient, uploadWorkspaceFile, getWorkspaceFileContent, deleteWorkspaceFile } from '../controllers/workspaceController.js';
 
 const router = express.Router();
 
@@ -12,6 +12,17 @@ const router = express.Router();
  *       - Workspace
  */
 router.get('/files', getWorkspaceFiles);
+
+/**
+ * @swagger
+ * /api/workspace/modes:
+ *   get:
+ *     summary: Get all available modes
+ *     tags:
+ *       - Workspace
+ *       - Modes
+ */
+router.get('/modes', getWorkspaceModes);
 
 /**
  * @swagger
@@ -52,6 +63,16 @@ router.post('/config', getProjectConfig);
  *       - Workspace
  */
 router.put('/config', updateProjectConfig);
+
+/**
+ * @swagger
+ * /api/workspace/all-projects:
+ *   get:
+ *     summary: Get all project configurations
+ *     tags:
+ *       - Workspace
+ */
+router.get('/all-projects', getAllProjects);
 
 /**
  * @swagger

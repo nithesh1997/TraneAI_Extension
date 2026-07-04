@@ -3,13 +3,15 @@ import { useAuth } from '../context/AuthContext';
 
 interface AppHeaderProps {
 	logoUri: string;
+	role?: string | null;
 	onNewChat: () => void;
 	onClearChat: () => void;
 	onShowHistory: () => void;
 	onShowAdmin: () => void;
+	onShowSuperadmin?: () => void;
 }
 
-export const AppHeader: React.FC<AppHeaderProps> = ({ logoUri, onNewChat, onClearChat, onShowHistory, onShowAdmin }) => {
+export const AppHeader: React.FC<AppHeaderProps> = ({ logoUri, role, onNewChat, onClearChat, onShowHistory, onShowAdmin, onShowSuperadmin }) => {
 	const { logout } = useAuth();
 
 	return (
@@ -23,12 +25,22 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ logoUri, onNewChat, onClea
 				</svg>
 				<div>All charts</div>
 			</button>
-			<button className="hdr-btn" title="Admin Access" onClick={onShowAdmin} style={{ marginLeft: '8px' }}>
-				<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-					<path d="M8 3.5v9M3.5 8h9M2 2h12v12H2z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-				</svg>
-				<div style={{ marginLeft: '4px' }}>Admin Access</div>
-			</button>
+			{(role === 'admin' || role === 'superadmin') && (
+				<button className="hdr-btn" title="Admin Access" onClick={onShowAdmin} style={{ marginLeft: '8px' }}>
+					<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+						<path d="M8 3.5v9M3.5 8h9M2 2h12v12H2z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+					</svg>
+					<div style={{ marginLeft: '4px' }}>Admin Access</div>
+				</button>
+			)}
+			{role === 'superadmin' && (
+				<button className="hdr-btn" title="Superadmin Access" onClick={onShowSuperadmin || onShowAdmin} style={{ marginLeft: '8px' }}>
+					<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+						<path d="M8 2l2 2 4-1-1 4 2 2-2 2 1 4-4-1-2 2-2-2-4 1 1-4-2-2 2-2-1-4 4 1z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+					</svg>
+					<div style={{ marginLeft: '4px' }}>Superadmin Access</div>
+				</button>
+			)}
 			<button className="hdr-btn" title="New Chat" onClick={onNewChat}>
 				<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
 					<path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
