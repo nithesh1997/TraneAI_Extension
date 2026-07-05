@@ -270,7 +270,7 @@ export async function deleteWorkspaceFile(req: Request, res: Response): Promise<
     }
 }
 
-function getEncryptionKey(secret: string): Buffer {
+export function getEncryptionKey(secret: string): Buffer {
     return crypto.scryptSync(secret || 'traneai-default-secret', 'traneai-salt', 32);
 }
 

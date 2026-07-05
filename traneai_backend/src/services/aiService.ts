@@ -10,6 +10,7 @@ import { ContextInjector } from './contextService';
 import { ImpactAnalyzer } from './impactAnalyzer';
 import { ArchitectureAnalyzer } from './architectureAnalyzer';
 import { ErrorInvestigator } from './errorInvestigator';
+import { getIndexer } from '../controllers/ragController';
 
 const indexers: Map<string, WorkspaceIndexer> = new Map();
 const contextInjectors: Map<string, ContextInjector> = new Map();
@@ -315,6 +316,21 @@ export async function generateAIResponseStreaming(
     const injector = contextInjectors.get(workspaceRoot);
     if (injector) {
       contextSnippets = injector.getRelevantContext(message, 5);
+    }
+    
+    // Augment context with RAG Vector DB Search
+    try {
+      const indexer = await getIndexer(workspaceRoot);
+      const ragChunks = await indexer.search(message, 3);
+      if (ragChunks && ragChunks.length > 0) {
+        contextSnippets += '\n\n--- RAG KNOWLEDGE BASE CONTEXT ---\n';
+        for (const chunk of ragChunks) {
+          contextSnippets += `\n[Source: ${chunk.filePath} - ${chunk.heading}]\n${chunk.text}\n`;
+        }
+        contextSnippets += '--- END RAG CONTEXT ---\n';
+      }
+    } catch (e) {
+      console.error('Failed to get RAG chunks:', e);
     }
 
     // Load content of pinned files

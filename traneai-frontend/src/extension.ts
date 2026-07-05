@@ -24,6 +24,30 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, provider)
 	);
 
+
+
+	// Register Command to Set API Key
+	context.subscriptions.push(
+		vscode.commands.registerCommand('trane-ai.setOpenAIApiKey', async () => {
+			const key = await vscode.window.showInputBox({
+				prompt: 'Enter your OpenAI API Key',
+				ignoreFocusOut: true,
+				password: true
+			});
+			if (key) {
+				await context.secrets.store('openaiApiKey', key);
+				vscode.window.showInformationMessage('OpenAI API Key saved successfully.');
+			}
+		})
+	);
+
+	// Register Command to Get API Key (internal use)
+	context.subscriptions.push(
+		vscode.commands.registerCommand('traneai.getOpenAIApiKey', async () => {
+			return await context.secrets.get('openaiApiKey');
+		})
+	);
+
 	// Auto-reload logic for webview in development
 	if (context.extensionMode === vscode.ExtensionMode.Development) {
 		const webviewWatcher = vscode.workspace.createFileSystemWatcher(

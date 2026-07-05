@@ -70,4 +70,4 @@ const projectConfigSchema = new Schema<IProjectConfig>(
   }
 );
 
-export const ProjectConfig = mongoose.model<IProjectConfig>('ProjectConfig', projectConfigSchema);
+export const ProjectConfig = mongoose.models.ProjectConfig || mongoose.model<IProjectConfig>('ProjectConfig', projectConfigSchema);

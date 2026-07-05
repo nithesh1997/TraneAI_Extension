@@ -437,5 +437,64 @@ export function handleWebviewMessage(provider: ChatViewProvider, data: any, vsco
                 });
             }
             break;
+        case 'search':
+            if (data.payload && data.payload.query) {
+                provider.postMessageToWebview({ type: 'searchLoading', value: true });
+                
+                const workspaceId = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || 'default';
+                
+                // Fetch the API key
+                vscode.commands.executeCommand('traneai.getOpenAIApiKey').then(async (apiKey: any) => {
+                    try {
+                        const fetch = (await import('node-fetch')).default;
+                        const response = await fetch('http://localhost:5000/api/rag/search', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'x-openai-api-key': (apiKey as string) || ''
+                            },
+                            body: JSON.stringify({
+                                workspaceId,
+                                query: data.payload.query
+                            })
+                        });
+                        
+                        if (!response.ok) {
+                            const errData = await response.json().catch(() => ({}));
+                            throw new Error(errData.error || 'Search request failed');
+                        }
+                        
+                        const result = await response.json();
+                        provider.postMessageToWebview({ type: 'searchResult', payload: result });
+                    } catch (err: any) {
+                        provider.postMessageToWebview({ type: 'searchError', payload: err.message });
+                    } finally {
+                        provider.postMessageToWebview({ type: 'searchLoading', value: false });
+                    }
+                });
+            }
+            break;
+        case 'openCitation':
+            if (data.filePath) {
+                const uri = vscode.Uri.file(data.filePath);
+                vscode.workspace.openTextDocument(uri).then((doc: vscode_api.TextDocument) => {
+                    vscode.window.showTextDocument(doc).then((editor: vscode_api.TextEditor) => {
+                        const text = doc.getText();
+                        const lines = text.split('\n');
+                        const targetHeading = data.heading.replace(/ \(Part \d+\)$/, '');
+                        
+                        for (let i = 0; i < lines.length; i++) {
+                            const line = lines[i];
+                            if (line.startsWith('#') && line.replace(/^#+\s*/, '').trim() === targetHeading) {
+                                const pos = new vscode.Position(i, 0);
+                                editor.selection = new vscode.Selection(pos, pos);
+                                editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.AtTop);
+                                break;
+                            }
+                        }
+                    });
+                });
+            }
+            break;
     }
 }

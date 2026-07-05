@@ -35,4 +35,4 @@ const workspaceFileSchema = new Schema<IWorkspaceFile>(
   }
 );
 
-export const WorkspaceFile = mongoose.model<IWorkspaceFile>('WorkspaceFile', workspaceFileSchema);
+export const WorkspaceFile = mongoose.models.WorkspaceFile || mongoose.model<IWorkspaceFile>('WorkspaceFile', workspaceFileSchema);

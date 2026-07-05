@@ -12,6 +12,7 @@ import mongoose from 'mongoose';
 import chatRoutes from './routes/chat.js';
 import workspaceRoutes from './routes/workspace.js';
 import authRoutes from './routes/auth.js';
+import ragRoutes from './routes/rag.js';
 import { swaggerOptions } from './swagger.js';
 import { initializeLiveShareWebSocket } from './services/liveScreenShareService.js';
 
@@ -36,6 +37,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 app.use('/api/chat', chatRoutes);
 app.use('/api/workspace', workspaceRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/rag', ragRoutes);
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });

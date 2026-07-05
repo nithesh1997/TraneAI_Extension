@@ -217,6 +217,7 @@ export class BackendService {
 
         const fs = require('fs');
         const path = require('path');
+        let configChanged = false;
 
         for (const file of roleData.files) {
             if (file.name === '.keep' || file.fileName === '.keep') continue;
@@ -232,17 +233,31 @@ export class BackendService {
                     if (response.ok) {
                         const data = await response.json();
                         if (data.success && data.content !== undefined) {
-                            const fullPath = path.join(workspaceRoot, file.path);
-                            const dir = path.dirname(fullPath);
-                            if (!fs.existsSync(dir)) {
-                                fs.mkdirSync(dir, { recursive: true });
+                            if (file.path.endsWith('.md')) {
+                                file.content = data.content;
+                                configChanged = true;
+                            } else {
+                                const fullPath = path.join(workspaceRoot, file.path);
+                                const dir = path.dirname(fullPath);
+                                if (!fs.existsSync(dir)) {
+                                    fs.mkdirSync(dir, { recursive: true });
+                                }
+                                fs.writeFileSync(fullPath, data.content, 'utf-8');
                             }
-                            fs.writeFileSync(fullPath, data.content, 'utf-8');
                         }
                     }
                 } catch (err) {
                     console.error('Failed to sync mode file:', file.path, err);
                 }
+            }
+        }
+
+        if (configChanged) {
+            try {
+                const configPath = path.join(workspaceRoot, '.traneAI', 'config.json');
+                fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+            } catch (err) {
+                console.error('Failed to save config.json after syncing mode files:', err);
             }
         }
     }

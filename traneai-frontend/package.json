@@ -134,8 +134,10 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "@types/node-fetch": "^2.6.13",
     "antd": "^6.3.7",
     "highlight.js": "^11.11.1",
+    "node-fetch": "^2.7.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-rnd": "^10.5.3"
