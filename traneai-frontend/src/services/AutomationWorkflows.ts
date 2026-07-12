@@ -73,7 +73,7 @@ export class AutomationWorkflows {
 		}
 	}
 
-public runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: string; description?: string; requirements?: string[] }) {
+public async runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: string; description?: string; requirements?: string[] }) {
 	const workspaceFolders = vscode.workspace.workspaceFolders;
 	if (!workspaceFolders) {
 		vscode.window.showErrorMessage('No workspace folder open.');
@@ -83,476 +83,189 @@ public runQAResearchWorkflow(ticketId: string, ticketContext?: { title?: string;
 	const rootPath = this.provider.findWorkspaceAppRoot() || workspaceFolders[0].uri.fsPath;
 	const writeEmitter = new vscode.EventEmitter<string>();
 	
-	const log = (msg: string) => writeEmitter.fire(msg.replace(/\n/g, '\r\n'));
 	const statusMessageId = `qa-status-${ticketId}-${Date.now()}`;
-	const statusLines: string[] = [];
+	let uiSteps: string[] = [];
 	const pushStatus = (text: string) => {
-		statusLines.push(`- ${text}`);
-		this.provider.updateMessageText(statusMessageId, `🔬 **QA Research: ${ticketId}**\n\n${statusLines.join('\n')}`, false);
+		uiSteps.push(text);
+		this.provider.updateMessageText(statusMessageId, `🔬 **QA Research: ${ticketId}**\n\n${uiSteps.map(s => '- ' + s).join('\n')}`, false);
 	};
+
 	let workflowClosed = false;
+	let sessionId: string | null = null;
+	let streamController: AbortController | null = null;
+
+	let hasOpenedUrl = false;
 	let detectedUrl: string | null = null;
 	let fallbackTimeout: NodeJS.Timeout | undefined;
-	let mainProcessPid: number | null = null;
-	
-	// Process management delegated to ProcessManager
-	
-	const cleanupProcesses = (reason: string) => {
-		if (workflowClosed) {
-			return;
-		}
-		workflowClosed = true;
-		pushStatus(reason);
-		this.provider.activeBrowserUrl = undefined;
+	let outputBuffer = '';
+
+	const openUrlInBrowser = (url: string) => {
+		if (!url || workflowClosed) return;
 		
-		log(`\x1b[33m⏹️ Stopping workflow and killing all processes...\x1b[0m\r\n`);
-		
-		// Kill by PID if we have it
-		if (mainProcessPid) {
-			log(`\x1b[33m  Killing process tree for PID ${mainProcessPid}...\x1b[0m\r\n`);
-			ProcessManager.killProcessTree(mainProcessPid, log);
-		}
-		
-		// Also kill any process on port 3000 to be thorough
-		log(`\x1b[33m  Checking for processes on port 3000...\x1b[0m\r\n`);
-		ProcessManager.killProcessByPort(3000);
-		
-		// Clear timeout
 		if (fallbackTimeout) {
 			clearTimeout(fallbackTimeout);
 			fallbackTimeout = undefined;
 		}
 		
-		setTimeout(() => {
-			log(`\x1b[32m✓ All processes terminated\x1b[0m\r\n`);
-			pushStatus('All processes terminated successfully.');
-		}, 1000);
+		writeEmitter.fire(`\r\n\x1b[32m  ✓ Opening URL in VS Code browser: ${url}\x1b[0m\r\n`);
+		pushStatus(`App detected at ${url}. Opening in VS Code browser now.`);
+		
+		const openInVSCodeBrowser = () => {
+			this.provider.activeBrowserUrl = url; // Show snapshot button
+			Promise.resolve(vscode.commands.executeCommand('simpleBrowser.api.open', url)).catch(() => {
+				vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url));
+			});
+		};
+		
+		setTimeout(openInVSCodeBrowser, 500);
 	};
-	
-	
-const openUrlInBrowser = (url: string) => {
-    if (!url || workflowClosed) return;
-    
-    if (fallbackTimeout) {
-        clearTimeout(fallbackTimeout);
-        fallbackTimeout = undefined;
-    }
-    
-    log(`\r\n\x1b[32m  ✓ Opening URL in VS Code browser: ${url}\x1b[0m\r\n`);
-    pushStatus(`App detected at **${url}**. Opening in VS Code browser now.`);
-    this.provider.activeBrowserUrl = url;
-    
-    setTimeout(() => {
-        if (!workflowClosed) {
-            // ONLY try VS Code browser methods - no external browser fallback
-            Promise.resolve(vscode.commands.executeCommand('simpleBrowser.api.open', url)).catch((err: any) => {
-                log(`\x1b[33m  ⚠ Simple browser failed, trying VS Code open command...\x1b[0m\r\n`);
-                Promise.resolve(vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url))).catch((err2: any) => {
-                    log(`\x1b[31m  ✗ Could not open in VS Code browser: ${err2.message}\x1b[0m\r\n`);
-                    pushStatus(`⚠ Could not open browser automatically. Please open ${url} manually in VS Code.`);
-                });
-            });
-        }
-    }, 500);
-};
+
+	const detectAndOpenUrl = (output: string) => {
+		if (hasOpenedUrl || workflowClosed) return;
+		
+		outputBuffer += output;
+		const clean = outputBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+		
+		const urlMatch = clean.match(
+			/(?:https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)(\/[^\s]*)?/i
+		);
+		
+		if (urlMatch && !detectedUrl) {
+			let url = urlMatch[0].replace(/[.,!?;:]+$/, '');
+			if (!/^https?:\/\//i.test(url)) {
+				url = `http://${url}`;
+			}
+			
+			if (url.includes('0.0.0.0')) {
+				const portMatch = url.match(/:(\d+)/);
+				if (portMatch) {
+					url = `http://localhost:${portMatch[1]}`;
+				}
+			}
+			
+			detectedUrl = url;
+			
+			if (!fallbackTimeout) {
+				fallbackTimeout = setTimeout(() => {
+					if (detectedUrl && !hasOpenedUrl && !workflowClosed) {
+						hasOpenedUrl = true;
+						openUrlInBrowser(detectedUrl);
+					}
+				}, 5000);
+			}
+			
+			const isReady = clean.toLowerCase().includes('compiled successfully') || 
+						   clean.toLowerCase().includes('ready in') ||
+						   clean.toLowerCase().includes('started successfully') ||
+						   clean.toLowerCase().includes('listening on') ||
+						   clean.toLowerCase().includes('webpack compiled');
+			
+			if (isReady && detectedUrl && !hasOpenedUrl) {
+				hasOpenedUrl = true;
+				openUrlInBrowser(detectedUrl);
+			}
+		}
+	};
+
+	const cleanupProcesses = async (reason: string) => {
+		if (workflowClosed) return;
+		workflowClosed = true;
+		pushStatus(reason);
+		
+		if (streamController) {
+			streamController.abort();
+		}
+
+		if (sessionId) {
+			try {
+				await fetch('http://localhost:5000/api/qa/stop-workflow', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ sessionId })
+				});
+			} catch (e) {}
+		}
+	};
 
 	const pty: vscode.Pseudoterminal = {
 		onDidWrite: writeEmitter.event,
 		handleInput: (data: string) => {
 			if (data === '\x03') { // Ctrl+C
-				log(`\r\n\x1b[31m^C\x1b[0m\r\n`);
+				writeEmitter.fire(`\r\n\x1b[31m^C\x1b[0m\r\n`);
 				cleanupProcesses('Workflow stopped by user (Ctrl+C).');
 			}
 		},
 		open: async () => {
-			log(`\x1b[34m╔══════════════════════════════════════════╗\x1b[0m\r\n`);
-			log(`\x1b[34m║  TraneAI QA Research: ${ticketId.padEnd(19)}║\x1b[0m\r\n`);
-			log(`\x1b[34m╚══════════════════════════════════════════╝\x1b[0m\r\n\r\n`);
-			log(`\x1b[33m⚠️  Press Ctrl+C to stop the workflow and kill all processes ⚠️\x1b[0m\r\n\r\n`);
+			writeEmitter.fire(`\x1b[34m╔══════════════════════════════════════════╗\x1b[0m\r\n`);
+			writeEmitter.fire(`\x1b[34m║  TraneAI QA Research (RAG-Backed)        ║\x1b[0m\r\n`);
+			writeEmitter.fire(`\x1b[34m╚══════════════════════════════════════════╝\x1b[0m\r\n\r\n`);
+			writeEmitter.fire(`\x1b[33m⚠️  Press Ctrl+C to stop the workflow ⚠️\x1b[0m\r\n\r\n`);
 
-			pushStatus('Step 1/5: Analyzing project structure...');
-			log(`\x1b[33m[Step 1/5] Analyzing project structure...\x1b[0m\r\n`);
-
-			let packageJson: any = {};
-			const packageJsonPath = path.join(rootPath, 'package.json');
 			try {
-				packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-				log(`\x1b[32m  ✓ Project : ${packageJson.name || 'Unknown'} (v${packageJson.version || '?'})\x1b[0m\r\n`);
-				pushStatus(`Step 1/5 complete: Project **${packageJson.name || 'Unknown'}** detected.`);
-			} catch {
-				log(`\x1b[33m  ⚠ Could not read package.json\x1b[0m\r\n`);
-				pushStatus('Step 1/5 warning: Could not read `package.json`. Continuing with defaults.');
-			}
-
-			pushStatus('Step 2/5: Checking git status...');
-			log(`\r\n\x1b[33m[Step 2/5] Checking git status...\x1b[0m\r\n`);
-
-			const runExec = (cmd: string): Promise<{ stdout: string, stderr: string, code: number | null }> => {
-				return new Promise((resolve) => {
-					let stdout = '';
-					let stderr = '';
-					const proc = exec(cmd, { cwd: rootPath });
-					proc.stdout?.on('data', (d) => {
-						const text = d.toString();
-						stdout += text;
-						if (cmd === 'git status --short') log(`  ${text}`);
-					});
-					proc.stderr?.on('data', (d) => {
-						const text = d.toString();
-						stderr += text;
-						if (cmd === 'git status --short') log(`\x1b[31m  ${text}\x1b[0m`);
-					});
-					proc.on('exit', (code) => resolve({ stdout, stderr, code }));
+				const response = await fetch('http://localhost:5000/api/qa/start-workflow', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						workspaceId: 'default', // Using default or actual if available
+						rootPath,
+						ticketId
+					})
 				});
-			};
 
-			const { stdout: gitStatusOutput } = await runExec('git status --short');
-			if (workflowClosed) return;
-			
-			const changedCount = gitStatusOutput.split('\n').map(line => line.trim()).filter(Boolean).length;
-			pushStatus(changedCount > 0
-				? `Step 2/5 complete: Git status found **${changedCount}** changed entries.`
-				: 'Step 2/5 complete: Working tree is clean.');
+				if (!response.ok) {
+					throw new Error('Failed to start workflow on backend');
+				}
 
-			pushStatus(`Step 3/5: Searching for branch matching **${ticketId}**...`);
-			log(`\r\n\x1b[33m[Step 3/5] Searching for branch: ${ticketId}...\x1b[0m\r\n`);
+				const data = await response.json();
+				sessionId = data.sessionId;
 
-			log(`\x1b[33m  → Pulling updated branches (git fetch)...\x1b[0m\r\n`);
-			await runExec('git fetch');
-			if (workflowClosed) return;
-
-			const { stdout: branchOutput } = await runExec('git branch -a');
-			if (workflowClosed) return;
-			
-			const allBranches = branchOutput
-				.split('\n')
-				.map(b => b.trim().replace(/^\*\s*/, ''))
-				.filter(Boolean);
-
-			let matchingBranch = allBranches.find(b => b === ticketId) || 
-								   allBranches.find(b => b.toLowerCase().includes(ticketId.toLowerCase()));
-
-			if (!matchingBranch) {
-				log(`\x1b[33m  ⚠ No branch matching "${ticketId}" found\x1b[0m\r\n`);
-				pushStatus(`Step 3/5: No branch matching **${ticketId}** found. Asking user for branch name...`);
+				streamController = new AbortController();
 				
-				// Generate selection field in webview
-				const choicesJson = JSON.stringify(allBranches.slice(0, 100)); // Limit to first 100 branches
-				this.provider.addMessage('ai', `I couldn't find a branch for **${ticketId}**. Please select one from the list below or continue with the current branch.\n\n[CHOICE]\nchoices: ${choicesJson}\nplaceholder: Select a branch for ${ticketId}\ncommand: selectChoice\n[/CHOICE]`);
-
-				// Wait for user to select from webview
-				const userBranch = await new Promise<string>((resolve) => {
-					this.provider.pendingChoices.set('branchSelection', resolve);
+				// Read SSE stream
+				const streamRes = await fetch(`http://localhost:5000/api/qa/stream/${sessionId}`, {
+					signal: streamController.signal
 				});
+				
+				if (!streamRes.body) return;
+				
+				const reader = streamRes.body.getReader();
+				const decoder = new TextDecoder('utf-8');
 
-				if (userBranch) {
-					matchingBranch = userBranch;
+				const processStream = async () => {
+				    try {
+				        while (!workflowClosed) {
+				            const { done, value } = await reader.read();
+				            if (done) break;
+
+				            const str = decoder.decode(value, { stream: true });
+				            const lines = str.split('\n');
+				            for (const line of lines) {
+				                if (line.startsWith('data: ')) {
+				                    try {
+				                        const parsed = JSON.parse(line.replace('data: ', '').trim());
+				                        if (parsed.message) {
+				                            writeEmitter.fire(parsed.message.replace(/\n/g, '\r\n'));
+				                            // Check if it's a step to update UI message
+				                            if (parsed.message.includes('Step ')) {
+				                                pushStatus(parsed.message.trim());
+				                            }
+				                            detectAndOpenUrl(parsed.message);
+				                        }
+				                    } catch (e) {}
+				                }
+				            }
+				        }
+				    } catch (err) {
+				        // Handle or ignore stream read errors
+				    }
+				};
+
+				processStream();
+
+			} catch (err: any) {
+				if (err.name !== 'AbortError') {
+					writeEmitter.fire(`\r\n\x1b[31m✗ Could not start backend workflow: ${err.message}\x1b[0m\r\n`);
 				}
-			}
-
-const startApplication = () => {
-    pushStatus('Step 5/5: Starting the application...');
-    log(`\r\n\x1b[33m[Step 5/5] Starting the application...\x1b[0m\r\n`);
-
-    const scripts = packageJson.scripts || {};
-    let startCmd = scripts['dev']
-	? 'npm run dev'
-	: scripts['start']
-	? 'npm start'
-	: scripts['serve']
-	? 'npm run serve'
-	: 'npm start';
-
-	// Prevent apps from opening external browser
-	if (process.platform === 'win32') {
-	startCmd = `set BROWSER=none && ${startCmd}`;
-	} else {
-	startCmd = `BROWSER=none ${startCmd}`;
-	}
-
-    log(`\x1b[32m  → Running: ${startCmd}\x1b[0m\r\n`);
-    pushStatus(`Step 5/5 in progress: Running \`${startCmd}\`.`);
-
-    // Function to detect the correct port from package.json or common configs
-    const getAppPort = (): number | null => {
-        // Check package.json for port configuration
-        let port = null;
-        
-        // Check for port in scripts
-        const startScript = scripts.dev || scripts.start || scripts.serve || '';
-        const portMatches = [
-            ...startScript.matchAll(/--port\s+(\d+)/g),
-            ...startScript.matchAll(/-p\s+(\d+)/g),
-            ...startScript.matchAll(/PORT=(\d+)/g),
-            ...startScript.matchAll(/port:(\d+)/g)
-        ];
-        
-        if (portMatches.length > 0) {
-            port = parseInt(portMatches[0][1]);
-            log(`\x1b[32m  → Detected port ${port} from package.json scripts\x1b[0m\r\n`);
-            return port;
-        }
-        
-        // Check for common frameworks default ports
-        const hasVite = fs.existsSync(path.join(rootPath, 'vite.config.js')) || 
-                       fs.existsSync(path.join(rootPath, 'vite.config.ts'));
-        if (hasVite) {
-            log(`\x1b[32m  → Detected Vite project (default port: 5173)\x1b[0m\r\n`);
-            return 5173;
-        }
-        
-        const hasNextJs = fs.existsSync(path.join(rootPath, 'next.config.js'));
-        if (hasNextJs) {
-            log(`\x1b[32m  → Detected Next.js project (default port: 3000)\x1b[0m\r\n`);
-            return 3000;
-        }
-        
-        const hasAngular = fs.existsSync(path.join(rootPath, 'angular.json'));
-        if (hasAngular) {
-            log(`\x1b[32m  → Detected Angular project (default port: 4200)\x1b[0m\r\n`);
-            return 4200;
-        }
-        
-        const hasReact = fs.existsSync(path.join(rootPath, 'webpack.config.js')) ||
-                        packageJson.dependencies?.react;
-        if (hasReact) {
-            log(`\x1b[32m  → Detected React project (default port: 3000)\x1b[0m\r\n`);
-            return 3000;
-        }
-        
-        // Default to 3000 for most Node.js apps
-        log(`\x1b[32m  → Using default port 3000\x1b[0m\r\n`);
-        return 3000;
-    };
-
-    // Function to wait for the specific port to be ready
-    const waitForPort = (port: number, timeout: number = 30000): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const startTime = Date.now();
-            const checkInterval = setInterval(() => {
-                const net = require('net');
-                const socket = new net.Socket();
-                
-                socket.setTimeout(1000);
-                
-                socket.on('connect', () => {
-                    clearInterval(checkInterval);
-                    socket.destroy();
-                    log(`\x1b[32m  ✓ Port ${port} is now listening\x1b[0m\r\n`);
-                    resolve(`http://localhost:${port}`);
-                });
-                
-                socket.on('timeout', () => {
-                    socket.destroy();
-                });
-                
-                socket.on('error', () => {
-                    socket.destroy();
-                });
-                
-                socket.connect(port, 'localhost');
-                
-                if (Date.now() - startTime > timeout) {
-                    clearInterval(checkInterval);
-                    reject(new Error(`Timeout waiting for port ${port} after ${timeout/1000} seconds`));
-                }
-            }, 1000);
-        });
-    };
-
-    // Start the app in external terminal (Windows) or integrated (Linux/macOS)
-    if (process.platform === 'win32') {
-        log(`\x1b[33m  → Opening in external terminal window (Windows)...\x1b[0m\r\n`);
-        const externalCmd = `start cmd /k "cd /d "${rootPath}" && ${startCmd}"`;
-        exec(externalCmd);
-        log(`\x1b[32m  ✓ External terminal launched\x1b[0m\r\n`);
-        
-        // Get the expected port
-        const expectedPort = getAppPort();
-        if (expectedPort) {
-            pushStatus(`Waiting for app to start on port ${expectedPort}...`);
-            log(`\x1b[33m  → Waiting for app to be ready on port ${expectedPort}...\x1b[0m\r\n`);
-            
-            // Wait for the port to be ready
-            waitForPort(expectedPort, 30000)
-                .then(url => {
-                    if (!workflowClosed) {
-                        detectedUrl = url;
-                        log(`\x1b[32m  ✓ App is ready at ${url}\x1b[0m\r\n`);
-                        pushStatus(`App detected at **${url}**. Opening in VS Code browser.`);
-                        setTimeout(() => {
-                            if (!workflowClosed) {
-                                openUrlInBrowser(url);
-                            }
-                        }, 1000);
-                    }
-                })
-                .catch(err => {
-                    if (!workflowClosed) {
-                        log(`\x1b[33m  ⚠ Could not detect app: ${err.message}\x1b[0m\r\n`);
-                        pushStatus(`⚠ Could not detect app on port ${expectedPort}. You may need to open the browser manually to ${expectedPort}.`);
-                    }
-                });
-        } else {
-            pushStatus(`⚠ Could not determine app port. You may need to open the browser manually.`);
-        }
-        
-        this.explainCommits(ticketId, rootPath);
-        return;
-    } else {
-        // Linux/macOS: Use integrated terminal with tracking
-        log(`\x1b[33m  → Starting with integrated terminal tracking...\x1b[0m\r\n`);
-        const startProc = exec(startCmd, { cwd: rootPath });
-        
-        if (startProc.pid) {
-            mainProcessPid = startProc.pid;
-            log(`\x1b[32m  → Main process PID: ${mainProcessPid}\x1b[0m\r\n`);
-        }
-        
-        let hasOpenedUrl = false;
-        let outputBuffer = '';
-        
-        const detectAndOpenUrl = (output: string) => {
-            if (hasOpenedUrl || workflowClosed) return;
-            
-            outputBuffer += output;
-            const clean = outputBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-            
-            // Look for port patterns specifically
-            const portMatch = clean.match(/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)[:\s]+(\d{4,5})/i);
-            let url = null;
-            
-            if (portMatch) {
-                const port = portMatch[1];
-                url = `http://localhost:${port}`;
-            } else {
-                // Fallback to standard port patterns
-                const urlMatch = clean.match(
-                    /(?:https?:\/\/)?(localhost|127\.0\.0\.1)(:\d{4,5})(?:\/[^\s]*)?/i
-                );
-                if (urlMatch) {
-                    url = urlMatch[0].startsWith('http') ? urlMatch[0] : `http://${urlMatch[0]}`;
-                }
-            }
-            
-            if (url && !detectedUrl) {
-                detectedUrl = url;
-                
-                if (!fallbackTimeout) {
-                    fallbackTimeout = setTimeout(() => {
-                        if (detectedUrl && !hasOpenedUrl && !workflowClosed) {
-                            hasOpenedUrl = true;
-                            openUrlInBrowser(detectedUrl);
-                        }
-                    }, 5000);
-                }
-
-                const isReady = clean.toLowerCase().includes('compiled successfully') || 
-                               clean.toLowerCase().includes('ready in') ||
-                               clean.toLowerCase().includes('started successfully') ||
-                               clean.toLowerCase().includes('listening on') ||
-                               clean.toLowerCase().includes('webpack compiled') ||
-                               clean.toLowerCase().includes('server running');
-                
-                if (isReady && detectedUrl && !hasOpenedUrl) {
-                    hasOpenedUrl = true;
-                    openUrlInBrowser(detectedUrl);
-                }
-            }
-        };
-        
-        startProc.stdout?.on('data', (d) => {
-            const text = d.toString();
-            log(text);
-            detectAndOpenUrl(text);
-        });
-        
-        startProc.stderr?.on('data', (d) => {
-            const text = d.toString();
-            log(text);
-            detectAndOpenUrl(text);
-        });
-        
-        startProc.on('error', (err) => {
-            log(`\r\n\x1b[31m  ✗ Start failed: ${err.message}\x1b[0m\r\n`);
-            pushStatus(`Step 5/5 failed: ${err.message}`);
-        });
-        
-        this.explainCommits(ticketId, rootPath);
-        return;
-    }
-};
-
-			const checkDependenciesAndContinue = () => {
-				pushStatus('Step 4/5: Checking whether dependencies are already installed...');
-				log(`\r\n\x1b[33m[Step 4/5] Checking dependencies...\x1b[0m\r\n`);
-
-				const nodeModulesPath = path.join(rootPath, 'node_modules');
-				const hasNodeModules = fs.existsSync(nodeModulesPath);
-				const requiredDeps = [
-					...Object.keys(packageJson.dependencies || {}),
-					...Object.keys(packageJson.devDependencies || {})
-				];
-				const missingDeps = hasNodeModules
-					? requiredDeps.filter(dep => !fs.existsSync(path.join(nodeModulesPath, ...dep.split('/'))))
-					: requiredDeps;
-
-				if (missingDeps.length === 0) {
-					log(`\x1b[32m  ✓ Dependencies already installed — skipping install\x1b[0m\r\n`);
-					pushStatus('Step 4/5 complete: Dependencies already installed. Skipping install.');
-					startApplication();
-					return;
-				}
-
-				const useYarn = fs.existsSync(path.join(rootPath, 'yarn.lock'));
-				const installCmd = useYarn ? 'yarn install' : 'npm install';
-				log(`\x1b[33m  ⚠ Missing dependencies detected (${missingDeps.length})\x1b[0m\r\n`);
-				log(`\x1b[32m  → Running: ${installCmd}\x1b[0m\r\n`);
-				pushStatus(`Step 4/5 in progress: Found **${missingDeps.length}** missing dependencies. Running \`${installCmd}\`.`);
-
-				const installProc = exec(installCmd, { cwd: rootPath });
-				installProc.stdout?.on('data', (d) => log(d.toString()));
-				installProc.stderr?.on('data', (d) => log(d.toString()));
-
-				installProc.on('exit', (code) => {
-					if (workflowClosed) return;
-					if (code !== 0) {
-						log(`\r\n\x1b[31m  ✗ Installation failed (exit code ${code})\x1b[0m\r\n`);
-						pushStatus(`Step 4/5 failed: Dependency installation failed (exit code ${code}).`);
-						return;
-					}
-					log(`\r\n\x1b[32m  ✓ Dependencies installed successfully\x1b[0m\r\n`);
-					pushStatus('Step 4/5 complete: Missing dependencies were installed successfully.');
-					startApplication();
-				});
-			};
-
-			if (matchingBranch) {
-				const cleanBranch = matchingBranch.replace(/^remotes\/origin\//, '');
-				log(`\x1b[32m  ✓ Found branch: ${cleanBranch}\x1b[0m\r\n`);
-				log(`\x1b[32m  → Checking out: ${cleanBranch}...\x1b[0m\r\n`);
-				pushStatus(`Step 3/5: Found branch **${cleanBranch}**. Checking out...`);
-
-				const gitCheckout = exec(`git checkout ${cleanBranch}`, { cwd: rootPath });
-				gitCheckout.stdout?.on('data', (d) => log(d.toString()));
-				gitCheckout.stderr?.on('data', (d) => log(d.toString()));
-
-				gitCheckout.on('exit', (code) => {
-					if (workflowClosed) return;
-					if (code === 0) {
-						log(`\x1b[32m  ✓ Checked out ${cleanBranch}\x1b[0m\r\n`);
-						pushStatus(`Step 3/5 complete: Checked out branch **${cleanBranch}**.`);
-						vscode.commands.executeCommand('git.refresh');
-					} else {
-						log(`\x1b[33m  ⚠ Checkout had issues, continuing on current branch...\x1b[0m\r\n`);
-						pushStatus('Step 3/5 warning: Checkout had issues. Continuing on current branch.');
-					}
-					checkDependenciesAndContinue();
-				});
-			} else {
-				log(`\x1b[33m  ⚠ No branch selected — continuing on current branch\x1b[0m\r\n`);
-				pushStatus(`Step 3/5 warning: No branch selected. Continuing on current branch.`);
-				checkDependenciesAndContinue();
 			}
 		},
 		close: () => {
@@ -560,10 +273,14 @@ const startApplication = () => {
 		}
 	};
 
-	this.provider.addMessage('ai', `🔬 **QA Research: ${ticketId}**\n\n- Workflow initialized\n- Status updates will appear here as a running list`, [], statusMessageId, false);
-
+	this.provider.addMessage('ai', `🔬 **QA Research: ${ticketId}**\n\n- Workflow initialized...`, [], statusMessageId, false);
 	const terminal = vscode.window.createTerminal({ name: `TraneAI QA: ${ticketId}`, pty });
 	terminal.show();
+
+	// Trigger related QA tasks
+	this.explainCommits(ticketId, rootPath);
+	// We call this right away, and can optionally re-run if URL is detected later, but old flow likely ran it here
+	this.explainTicketRequirements(ticketId, ticketContext);
 }
 
 // Add this import at the top of the file
@@ -803,7 +520,7 @@ Be specific and actionable. Format your response clearly using markdown.`;
 					
 					// Detect local URLs
 					const urlMatch = clean.match(
-						/(?:https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[\w.-]+)(:\d+)(\/[^\s]*)?/i
+						/(?:https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)(\/[^\s]*)?/i
 					);
 					
 					if (urlMatch && !detectedUrl) {

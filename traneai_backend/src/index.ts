@@ -13,6 +13,7 @@ import chatRoutes from './routes/chat.js';
 import workspaceRoutes from './routes/workspace.js';
 import authRoutes from './routes/auth.js';
 import ragRoutes from './routes/rag.js';
+import qaRoutes from './routes/qa.js';
 import { swaggerOptions } from './swagger.js';
 import { initializeLiveShareWebSocket } from './services/liveScreenShareService.js';
 
@@ -38,6 +39,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/workspace', workspaceRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/rag', ragRoutes);
+app.use('/api/qa', qaRoutes);
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
